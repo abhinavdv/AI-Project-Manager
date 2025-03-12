@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <!-- Add Material Design Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- Add Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1><i class="material-icons">integration_instructions</i> GitHub Manager</h1>
+        </header>
+        
+        <main class="app-content">
+            <div id="step-indicator">
+                <div class="step active" data-step="1">1. Instructions</div>
+                <div class="step" data-step="2">2. Big Goals</div>
+                <div class="step" data-step="3">3. Small Goals</div>
+                <div class="step" data-step="4">4. Create Repository</div>
+                <div class="step" data-step="5">5. Create Issues</div>
+            </div>
+            
+            <div class="progress-bar"></div>
+            
+            <div id="steps-container">
+                <!-- Step 1: Initial Prompt -->
+                <section id="step-1" class="step-content active">
+                    <h2>Enter Project Instructions</h2>
+                    <p>What would you like to build? Provide a detailed description of your project.</p>
+                    <div class="form-group">
+                        <textarea id="prompt-input" rows="10" placeholder="Enter project instructions or requirements..."></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button id="analyze-btn" class="btn primary">Analyze & Create Goals</button>
+                    </div>
+                </section>
+                
+                <!-- Step 2: Big Goals Review -->
+                <section id="step-2" class="step-content">
+                    <h2>Review Big Goals</h2>
+                    <p>These are the main goals identified for your project. You can edit them as needed.</p>
+                    <div id="big-goals-container" class="goals-container">
+                        <!-- Big goals will be dynamically inserted here -->
+                    </div>
+                    <div class="form-actions">
+                        <button id="back-to-prompt-btn" class="btn secondary">Back</button>
+                        <button id="proceed-to-small-goals-btn" class="btn primary">Break Down Goals</button>
+                    </div>
+                </section>
+                
+                <!-- Step 3: Small Goals Review -->
+                <section id="step-3" class="step-content">
+                    <h2>Review Small Goals</h2>
+                    <p>These are the specific, actionable goals for your project. You can edit them as needed.</p>
+                    <div id="small-goals-container" class="goals-container nested">
+                        <!-- Small goals will be dynamically inserted here -->
+                    </div>
+                    <div class="form-actions">
+                        <button id="back-to-big-goals-btn" class="btn secondary">Back</button>
+                        <button id="proceed-to-repo-btn" class="btn primary">Create Repository</button>
+                    </div>
+                </section>
+                
+                <!-- Step 4: Repository Creation -->
+                <section id="step-4" class="step-content">
+                    <h2>Create GitHub Repository</h2>
+                    <p>Enter the details for your new GitHub repository.</p>
+                    <div class="form-group">
+                        <label for="repo-name">Repository Name:</label>
+                        <input type="text" id="repo-name" placeholder="e.g. my-awesome-project">
+                    </div>
+                    <div class="form-group">
+                        <label for="repo-description">Repository Description:</label>
+                        <textarea id="repo-description" rows="3" placeholder="Brief description of your project..."></textarea>
+                    </div>
+                    <div id="repo-info-loading" class="loading-indicator hidden">
+                        <div class="spinner"></div>
+                        <span>Generating repository information...</span>
+                    </div>
+                    <div class="form-actions">
+                        <button id="back-to-small-goals-btn" class="btn secondary">Back</button>
+                        <button id="create-repo-btn" class="btn primary">Create Repository</button>
+                    </div>
+                </section>
+                
+                <!-- Step 5: Issue Creation -->
+                <section id="step-5" class="step-content">
+                    <h2>Create GitHub Issues</h2>
+                    <p>The following issues will be created in your repository.</p>
+                    <div id="issues-preview-container" class="goals-container">
+                        <!-- Issues preview will be dynamically inserted here -->
+                    </div>
+                    <div class="form-actions">
+                        <button id="back-to-repo-btn" class="btn secondary">Back</button>
+                        <button id="create-issues-btn" class="btn primary">Create Issues</button>
+                    </div>
+                </section>
+                
+                <!-- Results view -->
+                <section id="results" class="step-content">
+                    <h2>Success!</h2>
+                    <div id="results-container">
+                        <!-- Results will be dynamically inserted here -->
+                    </div>
+                    <div class="form-actions">
+                        <button id="start-over-btn" class="btn primary">Start New Project</button>
+                    </div>
+                </section>
+            </div>
+        </main>
+        
+        <div id="loading-overlay" class="hidden">
+            <div class="project-loader">
+                <div class="project-container">
+                    <div class="project-main"></div>
+                    <div class="project-parts">
+                        <div class="part part1"></div>
+                        <div class="part part2"></div>
+                        <div class="part part3"></div>
+                    </div>
+                </div>
+                <p id="loading-message">Processing...</p>
+            </div>
+        </div>
+        
+        <div id="notification" class="notification hidden">
+            <span id="notification-message"></span>
+            <button id="notification-close" class="btn-icon"><i class="material-icons">close</i></button>
+        </div>
+    </div>
+    
+    <!-- Goal template (hidden, used for cloning) -->
+    <template id="goal-template">
+        <div class="goal-item" data-id="">
+            <div class="goal-header">
+                <button class="btn-icon toggle-goal">
+                    <i class="material-icons">expand_more</i>
+                </button>
+                <input type="text" class="goal-title" value="">
+                <div class="goal-actions">
+                    <button class="btn-icon edit-goal"><i class="material-icons">edit</i></button>
+                    <button class="btn-icon delete-goal"><i class="material-icons">delete</i></button>
+                </div>
+            </div>
+            <div class="goal-body">
+                <textarea class="goal-description"></textarea>
+            </div>
+        </div>
+    </template>
+    
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html> 
