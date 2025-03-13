@@ -1,3 +1,5 @@
+Built end-to-end using Cursor. 0 lines of code actually written
+
 # GitHub Manager
 
 A web application to intelligently break down project requirements into GitHub issues.
