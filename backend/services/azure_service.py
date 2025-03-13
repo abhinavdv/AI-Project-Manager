@@ -4,6 +4,13 @@ from azure.ai.textanalytics import TextAnalyticsClient
 from azure.core.credentials import AzureKeyCredential
 import requests
 from typing import List, Dict, Any
+from dotenv import load_dotenv
+from prompts import (
+    SYSTEM_PROMPT,
+    GENERATE_GOALS_PROMPT,
+    BREAK_DOWN_GOAL_PROMPT,
+    GENERATE_REPO_INFO_PROMPT
+)
 
 class AzureService:
     def __init__(self):
@@ -12,11 +19,14 @@ class AzureService:
         endpoint = os.getenv('AZURE_ENDPOINT', 'YOUR_AZURE_ENDPOINT')
         self.text_client = self._create_text_client(key, endpoint)
         
-        # Azure OpenAI credentials
-        self.openai_key = os.getenv('AZURE_OPENAI_KEY', 'YOUR_AZURE_OPENAI_KEY')
-        self.openai_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', 'YOUR_AZURE_OPENAI_ENDPOINT')
-        self.openai_deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'YOUR_AZURE_OPENAI_DEPLOYMENT')
-        self.openai_api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2023-05-15')
+        # Load environment variables
+        load_dotenv()
+        
+        # Initialize Azure OpenAI configuration
+        self.openai_key = os.getenv("AZURE_OPENAI_KEY")
+        self.openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        self.openai_deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")
+        self.openai_api_version = os.getenv("OPENAI_API_VERSION", "2024-02-15-preview")
     
     def _create_text_client(self, key, endpoint):
         """Create an Azure Text Analytics client."""
@@ -40,12 +50,9 @@ class AzureService:
                 "api-key": self.openai_key
             }
             
-            # Add more explicit instructions to the system message
-            system_message = "You are a helpful assistant that specializes in project management and breaking down tasks. Your responses should be in valid JSON format only, without any additional text, explanations, or markdown formatting. Always structure your response exactly as requested in the user's prompt."
-            
             payload = {
                 "messages": [
-                    {"role": "system", "content": system_message},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
                 "max_tokens": max_tokens,
@@ -169,27 +176,7 @@ class AzureService:
         Returns:
             list: List of goals
         """
-        prompt = f"""
-        Based on the following project description, generate 3-5 broad project goals.
-        Each goal should represent a significant part of the project that can be broken down further.
-        
-        PROJECT DESCRIPTION:
-        {text}
-        
-        Provide the goals in the following JSON format:
-        {{
-            "goals": [
-                {{
-                    "id": 1,
-                    "title": "Goal title",
-                    "description": "Detailed description of the goal"
-                }},
-                ...
-            ]
-        }}
-        
-        Include only the JSON in your response.
-        """
+        prompt = GENERATE_GOALS_PROMPT.format(text=text)
         
         response = self._call_openai_api(prompt)
         
@@ -251,32 +238,15 @@ class AzureService:
         Returns:
             list: List of smaller goals
         """
-        prompt = f"""
-        Break down the following broad goal into 3-5 specific, actionable goals.
-        Each specific goal should be focused and achievable.
+        goal_id_start = goal_id * 100 + 1
+        goal_id_start_plus_one = goal_id_start + 1
         
-        BROAD GOAL: {goal_title}
-        DESCRIPTION: {goal_description}
-        
-        Provide the specific goals in the following JSON format:
-        {{
-            "specificGoals": [
-                {{
-                    "id": {goal_id * 100 + 1},
-                    "title": "First specific goal title",
-                    "description": "Detailed description of the first specific goal"
-                }},
-                {{
-                    "id": {goal_id * 100 + 2},
-                    "title": "Second specific goal title",
-                    "description": "Detailed description of the second specific goal"
-                }},
-                ... (and so on for 3-5 goals)
-            ]
-        }}
-        
-        Start IDs from {goal_id * 100 + 1} for tracking purposes. Include only the JSON in your response.
-        """
+        prompt = BREAK_DOWN_GOAL_PROMPT.format(
+            goal_title=goal_title,
+            goal_description=goal_description,
+            goal_id_start=goal_id_start,
+            goal_id_start_plus_one=goal_id_start_plus_one
+        )
         
         try:
             response = self._call_openai_api(prompt)
@@ -319,25 +289,7 @@ class AzureService:
             
         print(f"Generating repository info with prompt: {prompt[:100]}... and goals: {goals[:100]}...")
         
-        api_prompt = f"""
-        Based on the following project description and its goals, generate a suitable GitHub repository name and description.
-        
-        PROJECT DESCRIPTION:
-        {prompt}
-        
-        PROJECT GOALS:
-        {goals}
-        
-        Provide your response in the following JSON format:
-        {{
-            "repo_name": "repository-name-with-dashes",
-            "description": "A concise description of the project in one sentence."
-        }}
-        
-        The repository name should be lowercase, use dashes instead of spaces, and be concise but descriptive.
-        The description should briefly explain what the project does in one sentence.
-        Include only the JSON in your response.
-        """
+        api_prompt = GENERATE_REPO_INFO_PROMPT.format(prompt=prompt, goals=goals)
         
         try:
             response = self._call_openai_api(api_prompt)
@@ -360,17 +312,53 @@ class AzureService:
                         
                         if "repo_name" in repo_info and "description" in repo_info:
                             return repo_info
+                        elif "name" in repo_info and "description" in repo_info:
+                            # Fix property name to match expected format
+                            repo_info["repo_name"] = repo_info["name"]
+                            del repo_info["name"]
+                            return repo_info
                         else:
-                            raise Exception(f"Response missing required fields: {repo_info}")
+                            print(f"Response missing required fields: {repo_info}")
                     except json.JSONDecodeError:
                         print(f"Failed to parse JSON from: {json_str}")
-                        raise Exception(f"Failed to parse JSON from API response: {json_str}")
             
-            raise Exception(f"Failed to extract valid repository info from response: {response}")
+            # Use fallback method if API fails to return correct format
+            return self._generate_fallback_repo_info(prompt, goals)
         except Exception as e:
             print(f"Error generating repository info: {str(e)}")
-            raise
-            
+            # Use fallback method if API fails
+            return self._generate_fallback_repo_info(prompt, goals)
+        
+    def _generate_fallback_repo_info(self, prompt, goals):
+        """Generate fallback repository info when the API fails."""
+        print("Using fallback repository info generation")
+        
+        # Extract potential keywords from the goals and prompt
+        words = []
+        if goals:
+            words = goals.lower().replace('\n', ' ').split(' ')
+        elif prompt:
+            words = prompt.lower().split(' ')
+        
+        # Filter out common words and keep only alphanum
+        import re
+        words = [re.sub(r'[^a-z0-9]', '', word) for word in words if len(word) > 3 and word.lower() not in 
+                 ['with', 'the', 'and', 'that', 'this', 'for', 'from']]
+        
+        # Generate a repo name from the first few meaningful words
+        repo_name = "-".join(words[:2]) if len(words) >= 2 else "github-project"
+        
+        # Clean up repo name (remove any non-alphanumeric chars except dash)
+        repo_name = re.sub(r'[^a-z0-9\-]', '', repo_name.lower())
+        
+        # Generate a simple description based on the prompt
+        description = prompt[:60] + "..." if len(prompt) > 60 else prompt
+        
+        return {
+            "repo_name": repo_name,
+            "description": description
+        }
+    
     def _get_mock_repo_info(self):
         """Generate mock repository info."""
         return {

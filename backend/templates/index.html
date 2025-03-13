@@ -14,48 +14,159 @@
     <div class="app-container">
         <header class="app-header">
             <h1><i class="material-icons">integration_instructions</i> GitHub Manager</h1>
+            <button id="refresh-app" class="btn-icon refresh-button" title="Reset Application">
+                <i class="material-icons">refresh</i>
+            </button>
         </header>
         
-        <main class="app-content">
-            <div id="step-indicator">
-                <div class="step active" data-step="1">1. Instructions</div>
-                <div class="step" data-step="2">2. Big Goals</div>
-                <div class="step" data-step="3">3. Small Goals</div>
-                <div class="step" data-step="4">4. Create Repository</div>
-                <div class="step" data-step="5">5. Create Issues</div>
-            </div>
-            
+        <!-- Sidebar with step indicator -->
+        <div id="sidebar">
             <div class="progress-bar"></div>
-            
+            <div class="sidebar-toggle">
+                <button id="toggle-sidebar" class="btn-icon">
+                    <i class="material-icons">menu_open</i>
+                </button>
+            </div>
+            <div id="step-indicator">
+                <div class="step active" data-step="1">
+                    <i class="material-icons">mic</i>
+                    <span>1. Voice Input</span>
+                </div>
+                <div class="step" data-step="2">
+                    <i class="material-icons">description</i>
+                    <span>2. Instructions</span>
+                </div>
+                <div class="step" data-step="3">
+                    <i class="material-icons">list</i>
+                    <span>3. High-Level Tasks</span>
+                </div>
+                <div class="step" data-step="4">
+                    <i class="material-icons">subdirectory_arrow_right</i>
+                    <span>4. Sub-Tasks</span>
+                </div>
+                <div class="step" data-step="5">
+                    <i class="material-icons">code</i>
+                    <span>5. Create Repository</span>
+                </div>
+                <div class="step" data-step="6">
+                    <i class="material-icons">task_alt</i>
+                    <span>6. Create Issues</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Graph Toggle Button and Popup -->
+        <div id="graph-toggle">
+            <button id="toggle-graph" class="btn-icon">
+                <i class="material-icons">account_tree</i>
+            </button>
+        </div>
+        <div id="graph-popup" class="graph-popup hidden">
+            <div class="graph-popup-header">
+                <h3>Project Progress</h3>
+                <div class="view-toggles">
+                    <button class="btn-icon view-toggle active" id="tree-view-toggle" title="Tree View">
+                        <i class="material-icons">account_tree</i>
+                    </button>
+                    <button class="btn-icon view-toggle" id="graph-view-toggle" title="Graph View">
+                        <i class="material-icons">bubble_chart</i>
+                    </button>
+                </div>
+                <button class="btn-icon" id="close-graph">
+                    <i class="material-icons">close</i>
+                </button>
+            </div>
+            <div class="graph-content hidden">
+                <!-- Graph nodes will be dynamically added here -->
+            </div>
+            <div class="project-tree">
+                <div class="tree-root">
+                    <!-- Tree nodes will be dynamically added here -->
+                </div>
+            </div>
+        </div>
+        
+        <main class="app-content">
             <div id="steps-container">
-                <!-- Step 1: Initial Prompt -->
+                <!-- Step 1: Voice Input -->
                 <section id="step-1" class="step-content active">
-                    <h2>Enter Project Instructions</h2>
-                    <p>What would you like to build? Provide a detailed description of your project.</p>
-                    <div class="form-group">
-                        <textarea id="prompt-input" rows="10" placeholder="Enter project instructions or requirements..."></textarea>
+                    <h2>Voice Input</h2>
+                    <p>Use your voice to describe your project requirements.</p>
+                    <div class="audio-controls">
+                        <button id="start-recording" class="btn primary">
+                            <i class="material-icons">mic</i> Start Recording
+                        </button>
+                        <button id="stop-recording" class="btn danger hidden">
+                            <i class="material-icons">stop</i> Stop Recording
+                        </button>
+                        <div id="recording-indicator" class="hidden">
+                            <div class="recording-wave">
+                                <div class="wave"></div>
+                                <div class="wave"></div>
+                                <div class="wave"></div>
+                            </div>
+                            <span>Recording...</span>
+                        </div>
+                    </div>
+                    <div id="audio-preview" class="hidden">
+                        <h3>Recording Preview</h3>
+                        <audio id="audio-player" controls></audio>
+                        <div class="transcription-container hidden">
+                            <h3>Transcription</h3>
+                            <div id="transcription-text" class="transcription-text"></div>
+                            <div class="form-actions">
+                                <button id="redo-recording" class="btn secondary">
+                                    <i class="material-icons">refresh</i> Record Again
+                                </button>
+                                <button id="use-transcription" class="btn primary">
+                                    <i class="material-icons">check</i> Use This Text
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-actions">
-                        <button id="analyze-btn" class="btn primary">Analyze & Create Goals</button>
+                        <button id="skip-to-instructions" class="btn secondary">
+                            <i class="material-icons">skip_next</i> Skip to Text Input
+                        </button>
                     </div>
                 </section>
                 
-                <!-- Step 2: Big Goals Review -->
+                <!-- Step 2: Instructions -->
                 <section id="step-2" class="step-content">
-                    <h2>Review Big Goals</h2>
-                    <p>These are the main goals identified for your project. You can edit them as needed.</p>
-                    <div id="big-goals-container" class="goals-container">
-                        <!-- Big goals will be dynamically inserted here -->
+                    <h2>Project Instructions</h2>
+                    <p>Enter your project description or edit the transcribed text.</p>
+                    <div class="form-group">
+                        <label for="prompt-input">Project Description:</label>
+                        <textarea id="prompt-input" rows="6" placeholder="Describe your project requirements..."></textarea>
                     </div>
                     <div class="form-actions">
-                        <button id="back-to-prompt-btn" class="btn secondary">Back</button>
-                        <button id="proceed-to-small-goals-btn" class="btn primary">Break Down Goals</button>
+                        <button id="back-to-voice-btn" class="btn secondary">
+                            <i class="material-icons">arrow_back</i> Back to Voice
+                        </button>
+                        <button id="analyze-btn" class="btn primary">
+                            <i class="material-icons">auto_awesome</i> Analyze & Create Tasks
+                        </button>
                     </div>
                 </section>
                 
-                <!-- Step 3: Small Goals Review -->
+                <!-- Step 3: High-Level Tasks -->
                 <section id="step-3" class="step-content">
-                    <h2>Review Small Goals</h2>
+                    <h2>High-Level Tasks</h2>
+                    <p>Review and edit the generated high-level tasks for your project.</p>
+                    <div id="big-goals-container" class="goals-container"></div>
+                    <div class="form-actions">
+                        <button id="back-to-prompt-btn" class="btn secondary">
+                            <i class="material-icons">arrow_back</i> Back
+                        </button>
+                        <button id="proceed-to-small-goals-btn" class="btn primary">
+                            Break Down Tasks <i class="material-icons">arrow_forward</i>
+                        </button>
+                    </div>
+                </section>
+                
+                <!-- Step 4: Small Goals Review -->
+                <section id="step-4" class="step-content">
+                    <h2>Review Sub-Tasks</h2>
                     <p>These are the specific, actionable goals for your project. You can edit them as needed.</p>
                     <div id="small-goals-container" class="goals-container nested">
                         <!-- Small goals will be dynamically inserted here -->
@@ -66,8 +177,8 @@
                     </div>
                 </section>
                 
-                <!-- Step 4: Repository Creation -->
-                <section id="step-4" class="step-content">
+                <!-- Step 5: Repository Creation -->
+                <section id="step-5" class="step-content">
                     <h2>Create GitHub Repository</h2>
                     <p>Enter the details for your new GitHub repository.</p>
                     <div class="form-group">
@@ -88,8 +199,8 @@
                     </div>
                 </section>
                 
-                <!-- Step 5: Issue Creation -->
-                <section id="step-5" class="step-content">
+                <!-- Step 6: Issue Creation -->
+                <section id="step-6" class="step-content">
                     <h2>Create GitHub Issues</h2>
                     <p>The following issues will be created in your repository.</p>
                     <div id="issues-preview-container" class="goals-container">
@@ -125,6 +236,12 @@
                     </div>
                 </div>
                 <p id="loading-message">Processing...</p>
+                <div class="progress-indicator">
+                    <div class="progress-bar-container">
+                        <div id="loading-progress-bar"></div>
+                    </div>
+                    <div id="loading-percentage">0%</div>
+                </div>
             </div>
         </div>
         
