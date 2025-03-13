@@ -1,5 +1,40 @@
 // GitHub Manager Application
 
+// Add theme toggle functionality
+function toggleTheme() {
+    const isDarkTheme = document.body.classList.contains('light-theme');
+    
+    if (isDarkTheme) {
+        // Switch to dark theme
+        document.body.classList.remove('light-theme');
+        elements.themeToggle.querySelector('i').textContent = 'dark_mode';
+        state.theme = 'dark';
+    } else {
+        // Switch to light theme
+        document.body.classList.add('light-theme');
+        elements.themeToggle.querySelector('i').textContent = 'light_mode';
+        state.theme = 'light';
+    }
+    
+    saveStateToLocalStorage();
+}
+
+function applyStoredTheme() {
+    const html = document.documentElement;
+    const themeIcon = document.querySelector('#theme-toggle i');
+    const storedTheme = localStorage.getItem('theme') || 'dark';
+    
+    if (storedTheme === 'light') {
+        html.classList.remove('dark-mode');
+        html.classList.add('light-mode');
+        themeIcon.textContent = 'light_mode';
+    } else {
+        html.classList.remove('light-mode');
+        html.classList.add('dark-mode');
+        themeIcon.textContent = 'dark_mode';
+    }
+}
+
 // State management
 const state = {
     prompt: '',
@@ -9,14 +44,14 @@ const state = {
     issues: [],
     activeStep: 1,
     loading: false,
+    theme: 'dark', // Default theme
     // Track completion status of each step
     stepsCompleted: {
         1: false, // Voice Input
         2: false, // Instructions
         3: false, // High-Level Tasks
         4: false, // Sub-Tasks
-        5: false, // Repository
-        6: false  // Issues
+        5: false  // Repository
     },
     // Save input state for each step
     savedInputs: {
@@ -45,7 +80,7 @@ const elements = {
     notificationClose: document.getElementById('notification-close'),
     
     // Graph
-    graphToggle: document.getElementById('toggle-graph'),
+    graphToggle: document.getElementById('graph-toggle'),
     graphPopup: document.getElementById('graph-popup'),
     closeGraph: document.getElementById('close-graph'),
     graphContent: document.querySelector('.graph-content'),
@@ -99,6 +134,7 @@ const elements = {
     
     // Templates
     goalTemplate: document.getElementById('goal-template'),
+    themeToggle: document.getElementById('theme-toggle'),
 };
 
 // Debug log to check initialization of key elements
@@ -1101,6 +1137,37 @@ function setupEventListeners() {
     elements.stopRecordingBtn.addEventListener('click', stopRecording);
     elements.redoRecordingBtn.addEventListener('click', redoRecording);
     elements.useTranscriptionBtn.addEventListener('click', useTranscription);
+
+    // Theme toggle
+    elements.themeToggle.addEventListener('click', toggleTheme);
+
+    // Add ripple effect to buttons
+    document.querySelectorAll('.btn').forEach(button => {
+        button.classList.add('btn-ripple');
+        button.addEventListener('click', createRippleEffect);
+    });
+}
+
+function createRippleEffect(event) {
+    const button = event.currentTarget;
+    
+    const ripple = document.createElement('span');
+    ripple.classList.add('ripple');
+    
+    const rect = button.getBoundingClientRect();
+    
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    ripple.style.left = `${x}px`;
+    ripple.style.top = `${y}px`;
+    
+    button.appendChild(ripple);
+    
+    // Remove ripple after animation completes
+    setTimeout(() => {
+        ripple.remove();
+    }, 1000);
 }
 
 function setupScrollProgress() {
@@ -1455,29 +1522,102 @@ function init() {
     
     // Update completion indicators
     updateStepIndicators();
+
+    // Set initial theme
+    if (state.theme === 'light') {
+        document.body.classList.add('light-theme');
+        elements.themeToggle.querySelector('i').textContent = 'light_mode';
+    }
 }
 
 // Set up sidebar toggle functionality
 function setupSidebar() {
     const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('toggle-sidebar');
+    const toggleIcon = toggleBtn.querySelector('i');
     const appContent = document.querySelector('.app-content');
+    const mainContent = document.querySelector('.main-content');
     
     // Check if sidebar state is saved in localStorage
     const sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
     
-    if (sidebarCollapsed) {
-        sidebar.classList.add('collapsed');
-        appContent.classList.add('expanded');
+    // Update toggle icon based on sidebar state
+    function updateToggleIcon() {
+        if (sidebar.classList.contains('collapsed')) {
+            toggleIcon.textContent = 'menu';
+        } else {
+            toggleIcon.textContent = 'menu_open';
+        }
     }
     
+    // Function to check if we're on mobile view
+    function checkMobileView() {
+        const isMobile = window.innerWidth <= 1024;
+        
+        if (isMobile) {
+            sidebar.classList.add('collapsed');
+            if (mainContent) mainContent.classList.add('expanded');
+            if (appContent) appContent.classList.add('expanded');
+        } else {
+            // Only apply saved state if we're not on mobile
+            if (!sidebarCollapsed) {
+                sidebar.classList.remove('collapsed');
+                if (mainContent) mainContent.classList.remove('expanded');
+                if (appContent) appContent.classList.remove('expanded');
+            } else {
+                sidebar.classList.add('collapsed');
+                if (mainContent) mainContent.classList.add('expanded');
+                if (appContent) appContent.classList.add('expanded');
+            }
+        }
+        
+        // Update icon after sidebar state changes
+        updateToggleIcon();
+    }
+    
+    // Initial mobile check
+    checkMobileView();
+    
+    // Check mobile view on window resize
+    window.addEventListener('resize', checkMobileView);
+    
     // Add toggle event
-    toggleBtn.addEventListener('click', () => {
+    toggleBtn.addEventListener('click', (event) => {
+        event.stopPropagation(); // Prevent propagation to document click handler
+        
         sidebar.classList.toggle('collapsed');
-        appContent.classList.toggle('expanded');
+        if (mainContent) mainContent.classList.toggle('expanded');
+        if (appContent) appContent.classList.toggle('expanded');
+        
+        // Update icon after toggling
+        updateToggleIcon();
+        
+        // Close mobile sidebar when clicking elsewhere on mobile
+        if (window.innerWidth <= 1024 && !sidebar.classList.contains('collapsed')) {
+            sidebar.classList.add('mobile-visible');
+        } else {
+            sidebar.classList.remove('mobile-visible');
+        }
         
         // Save state to localStorage
         localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+    });
+    
+    // Close mobile sidebar when clicking outside on mobile
+    document.addEventListener('click', function(event) {
+        const isMobile = window.innerWidth <= 1024;
+        if (isMobile && 
+            !sidebar.contains(event.target) && 
+            !toggleBtn.contains(event.target) &&
+            sidebar.classList.contains('mobile-visible')) {
+            sidebar.classList.add('collapsed');
+            sidebar.classList.remove('mobile-visible');
+            if (mainContent) mainContent.classList.add('expanded');
+            if (appContent) appContent.classList.add('expanded');
+            
+            // Update icon after closing sidebar
+            updateToggleIcon();
+        }
     });
 }
 
@@ -1703,6 +1843,7 @@ function saveStateToLocalStorage() {
             repository: state.repository,
             stepsCompleted: state.stepsCompleted,
             savedInputs: state.savedInputs,
+            transcription: state.transcription,
             transcription: state.transcription
         };
         

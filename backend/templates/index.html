@@ -1,65 +1,79 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark-mode">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub Manager</title>
+    <meta name="description" content="GitHub Manager - Intelligently break down project requirements into GitHub issues">
+    <meta name="theme-color" content="#0f172a">
+    <title>GitHub Manager | Project Tasks Generator</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <!-- Add Material Design Icons -->
+    <!-- Material Design Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <!-- Add Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI4IiBmaWxsPSIjNGY0NmU1Ii8+PHBhdGggZD0iTTcgMTQuNUwxNiA4TDI1IDE0LjVWMjRIMTguNVYxOEgxMy41VjI0SDdWMTQuNVoiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIvPjwvc3ZnPg==">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <!-- Animation Library -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
 </head>
 <body>
     <div class="app-container">
         <header class="app-header">
-            <h1><i class="material-icons">integration_instructions</i> GitHub Manager</h1>
-            <button id="refresh-app" class="btn-icon refresh-button" title="Reset Application">
-                <i class="material-icons">refresh</i>
-            </button>
+            <div class="brand">
+                <h1><i class="material-icons">integration_instructions</i> GitHub Manager</h1>
+                <span class="tagline">Intelligent task generator</span>
+            </div>
+            <div class="header-actions">
+                <button id="theme-toggle" class="btn-icon" title="Toggle Dark/Light Mode">
+                    <i class="material-icons">dark_mode</i>
+                </button>
+                <button id="refresh-app" class="btn-icon refresh-button" title="Reset Application">
+                    <i class="material-icons">refresh</i>
+                </button>
+            </div>
         </header>
         
         <!-- Sidebar with step indicator -->
         <div id="sidebar">
             <div class="progress-bar"></div>
-            <div class="sidebar-toggle">
-                <button id="toggle-sidebar" class="btn-icon">
-                    <i class="material-icons">menu_open</i>
-                </button>
-            </div>
             <div id="step-indicator">
                 <div class="step active" data-step="1">
                     <i class="material-icons">mic</i>
-                    <span>1. Voice Input</span>
+                    <span>Voice Input</span>
                 </div>
                 <div class="step" data-step="2">
                     <i class="material-icons">description</i>
-                    <span>2. Instructions</span>
+                    <span>Instructions</span>
                 </div>
                 <div class="step" data-step="3">
                     <i class="material-icons">list</i>
-                    <span>3. High-Level Tasks</span>
+                    <span>High-Level Tasks</span>
                 </div>
                 <div class="step" data-step="4">
                     <i class="material-icons">subdirectory_arrow_right</i>
-                    <span>4. Sub-Tasks</span>
+                    <span>Sub-Tasks</span>
                 </div>
                 <div class="step" data-step="5">
                     <i class="material-icons">code</i>
-                    <span>5. Create Repository</span>
-                </div>
-                <div class="step" data-step="6">
-                    <i class="material-icons">task_alt</i>
-                    <span>6. Create Issues</span>
+                    <span>Create Repository</span>
                 </div>
             </div>
         </div>
         
+        <!-- Sidebar toggle button - moved outside sidebar to ensure visibility -->
+        <div class="sidebar-toggle" id="toggle-sidebar">
+            <i class="material-icons">menu</i>
+            <span class="toggle-text">MENU</span>
+        </div>
+        
         <!-- Graph Toggle Button and Popup -->
-        <div id="graph-toggle">
-            <button id="toggle-graph" class="btn-icon">
-                <i class="material-icons">account_tree</i>
-            </button>
+        <div id="graph-toggle" class="float-btn">
+            <i class="material-icons">account_tree</i>
         </div>
         <div id="graph-popup" class="graph-popup hidden">
             <div class="graph-popup-header">
