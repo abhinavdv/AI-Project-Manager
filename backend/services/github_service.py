@@ -64,59 +64,48 @@ class GitHubService:
     
     def create_issue(self, repo_name, title, body=None, is_broad_goal=False, is_specific_goal=False, parent_issue_number=None):
         """
-        Create a new GitHub issue for the repository.
+        Create a new issue in the specified repository.
         
         Args:
             repo_name (str): The name of the repository
-            title (str): Issue title
-            body (str, optional): Issue body/description
-            is_broad_goal (bool): Whether this is a broad goal
-            is_specific_goal (bool): Whether this is a specific goal
-            parent_issue_number (int, optional): The issue number of the parent issue
+            title (str): The title of the issue
+            body (str, optional): The body/description of the issue
+            is_broad_goal (bool): Whether this is a high-level task
+            is_specific_goal (bool): Whether this is a sub-task
+            parent_issue_number (int, optional): The issue number of the parent task
             
         Returns:
-            dict: Issue information if successful
+            dict: The created issue data
         """
-        # Get username from API if not set
         username = self._get_username()
+        url = f"{self.api_base_url}/repos/{username}/{repo_name}/issues"
         
-        endpoint = f'{self.api_base_url}/repos/{username}/{repo_name}/issues'
+        # Add parent reference to body if provided
+        if parent_issue_number:
+            parent_ref = f"\n\nParent Task: #{parent_issue_number}"
+            body = f"{body or ''}{parent_ref}"
         
-        # Format the body with appropriate labels
-        formatted_body = body or ""
-        
+        # Prepare labels
+        labels = []
         if is_broad_goal:
-            if not formatted_body.strip():
-                formatted_body = "## Broad Goal\n\nThis is a main project goal."
-            labels = ["broad-goal"]
-        elif is_specific_goal:
-            if parent_issue_number:
-                if not formatted_body.strip():
-                    formatted_body = f"## Specific Goal\n\nSub-task of #{parent_issue_number}"
-                else:
-                    formatted_body = f"{formatted_body}\n\n---\n_Sub-task of #{parent_issue_number}_"
-            labels = ["specific-goal"]
-        else:
-            labels = []
+            labels.append("broad-goal")
+        if is_specific_goal:
+            labels.append("specific-goal")
         
         data = {
-            'title': title,
-            'body': formatted_body,
-            'labels': labels
+            "title": title,
+            "body": body or "",
+            "labels": labels
         }
         
-        print(f"Creating issue: {title} in {repo_name}")
-        
         response = requests.post(
-            endpoint,
+            url,
             headers=self.get_headers(),
             json=data
         )
         
         if response.status_code != 201:
-            error_msg = f"Failed to create issue: {response.status_code} - {response.text}"
-            print(error_msg)
-            raise Exception(error_msg)
+            raise Exception(f"Failed to create issue: {response.json().get('message', 'Unknown error')}")
         
         return response.json()
     
@@ -154,27 +143,158 @@ class GitHubService:
             user = self._get_username()
             
             created_issues = []
+            issue_number_map = {}  # Map of goal ID to issue number
+            
+            # First create all broad goals (parent issues)
             for goal in goals:
-                title = goal.get('title', '')
-                description = goal.get('description', '')
-                
-                issue = self.create_issue(
-                    repo_name, 
-                    title, 
-                    description, 
-                    is_broad_goal=goal.get('is_broad_goal', False), 
-                    is_specific_goal=goal.get('is_specific_goal', False), 
-                    parent_issue_number=goal.get('parent_issue_number')
-                )
-                
-                created_issues.append({
-                    "id": issue['number'],
-                    "title": issue['title'],
-                    "description": issue['body'],
-                    "url": issue['html_url']
-                })
+                if goal.get('is_broad_goal', False):
+                    issue = self.create_issue(
+                        repo_name, 
+                        goal['title'], 
+                        goal['description'], 
+                        is_broad_goal=True,
+                        is_specific_goal=False
+                    )
+                    
+                    created_issues.append({
+                        "id": issue['number'],
+                        "title": issue['title'],
+                        "description": issue['body'],
+                        "url": issue['html_url']
+                    })
+                    
+                    # Store the mapping of goal ID to issue number
+                    issue_number_map[goal['id']] = issue['number']
+            
+            # Then create all specific goals (child issues) with correct parent references
+            for goal in goals:
+                if goal.get('is_specific_goal', False):
+                    parent_id = goal.get('parent_issue_number')
+                    parent_number = issue_number_map.get(parent_id)
+                    
+                    issue = self.create_issue(
+                        repo_name, 
+                        goal['title'], 
+                        goal['description'], 
+                        is_broad_goal=False,
+                        is_specific_goal=True,
+                        parent_issue_number=parent_number
+                    )
+                    
+                    created_issues.append({
+                        "id": issue['number'],
+                        "title": issue['title'],
+                        "description": issue['body'],
+                        "url": issue['html_url']
+                    })
             
             return created_issues
         except Exception as e:
             print(f"Error creating issues: {str(e)}")
             raise 
+
+    def get_user_repositories(self):
+        """Get list of repositories for the authenticated user."""
+        endpoint = f'{self.api_base_url}/user/repos'
+        
+        response = requests.get(
+            endpoint,
+            headers=self.get_headers(),
+            params={'sort': 'updated', 'direction': 'desc'}
+        )
+        
+        if response.status_code != 200:
+            error_msg = f"Failed to get repositories: {response.status_code} - {response.text}"
+            print(error_msg)
+            raise Exception(error_msg)
+        
+        repos = response.json()
+        return [{
+            'name': repo['name'],
+            'description': repo['description'],
+            'url': repo['html_url'],
+            'updated_at': repo['updated_at']
+        } for repo in repos]
+
+    def get_repository_issues(self, repo_name, state='all'):
+        """
+        Get all issues for a repository.
+        
+        Args:
+            repo_name (str): The name of the repository
+            state (str): State of issues to fetch ('open', 'closed', or 'all')
+            
+        Returns:
+            list: List of issues with their details
+        """
+        username = self._get_username()
+        endpoint = f'{self.api_base_url}/repos/{username}/{repo_name}/issues'
+        
+        response = requests.get(
+            endpoint,
+            headers=self.get_headers(),
+            params={'state': state, 'per_page': 100}
+        )
+        
+        if response.status_code != 200:
+            error_msg = f"Failed to get issues: {response.status_code} - {response.text}"
+            print(error_msg)
+            raise Exception(error_msg)
+        
+        issues = response.json()
+        return [{
+            'id': issue['number'],
+            'title': issue['title'],
+            'description': issue['body'],
+            'url': issue['html_url'],
+            'state': issue['state'],
+            'labels': [label['name'] for label in issue['labels']],
+            'is_broad_goal': any(label['name'] == 'broad-goal' for label in issue['labels']),
+            'is_specific_goal': any(label['name'] == 'specific-goal' for label in issue['labels'])
+        } for issue in issues]
+
+    def update_issue(self, repo_name, issue_number, title=None, body=None, state=None):
+        """
+        Update an existing issue.
+        
+        Args:
+            repo_name (str): The name of the repository
+            issue_number (int): The issue number to update
+            title (str, optional): New title for the issue
+            body (str, optional): New body/description for the issue
+            state (str, optional): New state for the issue ('open' or 'closed')
+            
+        Returns:
+            dict: Updated issue information
+        """
+        username = self._get_username()
+        endpoint = f'{self.api_base_url}/repos/{username}/{repo_name}/issues/{issue_number}'
+        
+        data = {}
+        if title is not None:
+            data['title'] = title
+        if body is not None:
+            data['body'] = body
+        if state is not None:
+            data['state'] = state
+        
+        response = requests.patch(
+            endpoint,
+            headers=self.get_headers(),
+            json=data
+        )
+        
+        if response.status_code != 200:
+            error_msg = f"Failed to update issue: {response.status_code} - {response.text}"
+            print(error_msg)
+            raise Exception(error_msg)
+        
+        issue = response.json()
+        return {
+            'id': issue['number'],
+            'title': issue['title'],
+            'description': issue['body'],
+            'url': issue['html_url'],
+            'state': issue['state'],
+            'labels': [label['name'] for label in issue['labels']]
+        } 

@@ -1,5 +1,99 @@
 // GitHub Manager Application
 
+// Initialize state object
+const state = {
+    // Core state
+    currentStep: 1,
+    prompt: '',
+    bigGoals: [],
+    smallGoals: {},
+    repository: null,
+    selectedRepository: null,
+    issues: [],
+    loading: false,
+    activeStep: 1,
+    
+    // Theme
+    theme: 'dark', // Default theme
+    
+    // Mode
+    isNewProjectMode: true,
+    
+    // Step tracking
+    stepsCompleted: {
+        1: false, // Voice Input
+        2: false, // Instructions
+        3: false, // Tasks
+        4: false  // Repository
+    },
+    
+    // Input state
+    savedInputs: {
+        1: '', // Voice recording/transcription
+        2: '', // Prompt text
+        3: { bigGoals: [], smallGoals: {} }, // Combined tasks
+        4: { name: '', description: '' } // Repository info
+    },
+    
+    // Voice/audio state
+    mediaRecorder: null,
+    audioChunks: [],
+    transcription: '',
+    voiceChat: {
+        isActive: false,
+        activeTaskId: null,
+        mediaRecorder: null,
+        audioChunks: [],
+        conversation: {} // Map of taskId to conversation history
+    },
+    taskModification: {
+        isActive: false,
+        mediaRecorder: null,
+        audioChunks: []
+    }
+};
+
+// Mode switching functionality
+const initModeSwitching = () => {
+    const newProjectBtn = document.getElementById('new-project-mode');
+    const existingProjectBtn = document.getElementById('existing-project-mode');
+    const stepIndicator = document.getElementById('step-indicator');
+    const stepsContainer = document.getElementById('steps-container');
+    const repoSelector = document.querySelector('.repository-selector');
+
+    newProjectBtn.addEventListener('click', function() {
+        state.isNewProjectMode = true;
+        this.classList.add('active');
+        existingProjectBtn.classList.remove('active');
+        
+        stepIndicator.classList.remove('hidden');
+        stepsContainer.classList.remove('hidden');
+        repoSelector.classList.add('hidden');
+        
+        showStep(1);
+    });
+
+    existingProjectBtn.addEventListener('click', function() {
+        state.isNewProjectMode = false;
+        this.classList.add('active');
+        newProjectBtn.classList.remove('active');
+        
+        // Only hide step indicator, not the steps container
+        stepIndicator.classList.add('hidden');
+        repoSelector.classList.remove('hidden');
+        
+        // Hide all steps but don't hide the container
+        document.querySelectorAll('.step-content').forEach(step => {
+            step.classList.remove('active');
+        });
+        
+        loadRepositories();
+    });
+};
+
+// Call initModeSwitching after DOM is loaded
+document.addEventListener('DOMContentLoaded', initModeSwitching);
+
 // Add theme toggle functionality
 function toggleTheme() {
     const isDarkTheme = document.body.classList.contains('light-theme');
@@ -34,37 +128,6 @@ function applyStoredTheme() {
         themeIcon.textContent = 'dark_mode';
     }
 }
-
-// State management
-const state = {
-    prompt: '',
-    bigGoals: [],
-    smallGoals: {},
-    repository: null,
-    issues: [],
-    activeStep: 1,
-    loading: false,
-    theme: 'dark', // Default theme
-    // Track completion status of each step
-    stepsCompleted: {
-        1: false, // Voice Input
-        2: false, // Instructions
-        3: false, // High-Level Tasks
-        4: false, // Sub-Tasks
-        5: false  // Repository
-    },
-    // Save input state for each step
-    savedInputs: {
-        1: '', // Voice recording/transcription
-        2: '', // Prompt text
-        3: [], // High-level tasks
-        4: {}, // Sub-tasks
-        5: { name: '', description: '' } // Repository info
-    },
-    mediaRecorder: null,
-    audioChunks: [],
-    transcription: '',
-};
 
 // DOM Elements
 const elements = {
@@ -106,27 +169,16 @@ const elements = {
     analyzeBtn: document.getElementById('analyze-btn'),
     backToVoiceBtn: document.getElementById('back-to-voice-btn'),
     
-    // Step 3: Big Goals
-    bigGoalsContainer: document.getElementById('big-goals-container'),
+    // Step 3: Tasks
+    tasksContainer: document.getElementById('tasks-container'),
     backToPromptBtn: document.getElementById('back-to-prompt-btn'),
-    proceedToSmallGoalsBtn: document.getElementById('proceed-to-small-goals-btn'),
-    
-    // Step 4: Small Goals
-    smallGoalsContainer: document.getElementById('small-goals-container'),
-    backToBigGoalsBtn: document.getElementById('back-to-big-goals-btn'),
     proceedToRepoBtn: document.getElementById('proceed-to-repo-btn'),
     
-    // Step 5: Repository
+    // Step 4: Repository
     repoNameInput: document.getElementById('repo-name'),
     repoDescriptionInput: document.getElementById('repo-description'),
     repoInfoLoading: document.getElementById('repo-info-loading'),
-    backToSmallGoalsBtn: document.getElementById('back-to-small-goals-btn'),
     createRepoBtn: document.getElementById('create-repo-btn'),
-    
-    // Step 6: Issues
-    issuesPreviewContainer: document.getElementById('issues-preview-container'),
-    backToRepoBtn: document.getElementById('back-to-repo-btn'),
-    createIssuesBtn: document.getElementById('create-issues-btn'),
     
     // Results
     resultsContainer: document.getElementById('results-container'),
@@ -135,15 +187,28 @@ const elements = {
     // Templates
     goalTemplate: document.getElementById('goal-template'),
     themeToggle: document.getElementById('theme-toggle'),
+    createIssuesBtn: document.getElementById('create-issues-btn'),
+    repoSelector: document.querySelector('.repository-selector'),
+    repoSearch: document.getElementById('repo-search'),
+    loadReposBtn: document.getElementById('load-repositories'),
+    reposList: document.getElementById('repositories-list'),
+    newProjectMode: document.getElementById('new-project-mode'),
+    existingProjectMode: document.getElementById('existing-project-mode'),
+    backToIssuesBtn: document.getElementById('back-to-issues-btn'),
+    refreshIssuesBtn: document.getElementById('refresh-issues-btn'),
+    createNewIssueBtn: document.getElementById('create-new-issue-btn'),
+    issuesContainer: document.getElementById('issues-container'),
 };
 
 // Debug log to check initialization of key elements
 console.log('DOM Elements initialization check:');
-console.log('- repoNameInput:', elements.repoNameInput);
+console.log('- repoNameInput:', elements.repoNameInput, document.getElementById('repo-name'));
+console.log('- repoNameInput ID:', elements.repoNameInput ? elements.repoNameInput.id : 'not found');
+console.log('- repoNameInput exists:', !!document.getElementById('repo-name'));
 console.log('- repoDescriptionInput:', elements.repoDescriptionInput);
 console.log('- repoInfoLoading:', elements.repoInfoLoading);
 console.log('- promptInput:', elements.promptInput);
-console.log('- bigGoalsContainer:', elements.bigGoalsContainer);
+console.log('- tasksContainer:', elements.tasksContainer);
 
 // Utility functions
 function showLoading(message = 'Processing...', initialPercentage = 0) {
@@ -151,22 +216,67 @@ function showLoading(message = 'Processing...', initialPercentage = 0) {
     elements.loadingMessage.textContent = message;
     updateLoadingPercentage(initialPercentage);
     elements.loadingOverlay.classList.remove('hidden');
+    
+    // Add entrance animation classes
+    requestAnimationFrame(() => {
+        elements.loadingOverlay.style.opacity = '1';
+        elements.loadingOverlay.style.visibility = 'visible';
+    });
 }
 
 function hideLoading() {
-    state.loading = false;
-    elements.loadingOverlay.classList.add('hidden');
-    // Reset progress for next time
-    updateLoadingPercentage(0);
+    if (!state.loading) return;
+    
+    // Add exit animation
+    elements.loadingOverlay.style.opacity = '0';
+    elements.loadingOverlay.style.visibility = 'hidden';
+    
+    // Wait for animation to complete before hiding
+    setTimeout(() => {
+        state.loading = false;
+        elements.loadingOverlay.classList.add('hidden');
+        // Reset progress for next time
+        updateLoadingPercentage(0);
+    }, 300);
 }
 
-function updateLoadingPercentage(percentage) {
+function updateLoadingPercentage(targetPercentage) {
     // Ensure percentage is between 0 and 100
-    percentage = Math.max(0, Math.min(100, percentage));
+    targetPercentage = Math.max(0, Math.min(100, targetPercentage));
     
-    // Update the progress bar and text
-    elements.loadingProgressBar.style.width = percentage + '%';
-    elements.loadingPercentage.textContent = Math.round(percentage) + '%';
+    // Get current percentage
+    const currentPercentage = parseInt(elements.loadingPercentage.textContent) || 0;
+    
+    // Animate from current to target percentage
+    animateProgress(currentPercentage, targetPercentage);
+}
+
+function animateProgress(start, end) {
+    const duration = 500; // Animation duration in ms
+    const startTime = performance.now();
+    
+    function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Use easeInOutCubic for smooth animation
+        const easing = progress < 0.5
+            ? 4 * progress * progress * progress
+            : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+        
+        const current = start + (end - start) * easing;
+        
+        // Update progress bar and text
+        elements.loadingProgressBar.style.width = `${current}%`;
+        elements.loadingPercentage.textContent = `${Math.round(current)}%`;
+        
+        // Continue animation if not complete
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        }
+    }
+    
+    requestAnimationFrame(update);
 }
 
 // Function to simulate loading progress between steps
@@ -187,7 +297,7 @@ function simulateStepTransition(fromStep, toStep, callback, duration = 1000) {
             setTimeout(() => {
                 hideLoading();
                 if (callback) callback();
-            }, 200); // Small delay at 100% for visual confirmation
+            }, 300); // Match the hideLoading animation duration
         }
     }, interval);
 }
@@ -206,56 +316,76 @@ function getStepName(stepNumber) {
 }
 
 // Show notification with auto-hide
-function showNotification(message, type = 'success') {
-    elements.notificationMessage.textContent = message;
-    elements.notification.className = 'notification ' + type;
-    elements.notification.classList.remove('hidden');
+function showNotification(message, type = 'success', duration = 3000) {
+    // Remove any existing notifications
+    const existingNotification = document.querySelector('.notification');
+    if (existingNotification) {
+        existingNotification.remove();
+    }
     
-    // Auto-hide after 5 seconds
+    // Create a new notification
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    
+    // For transcription responses, truncate if too long but provide full content on hover
+    let displayMessage = message;
+    let fullMessage = message;
+    
+    if (message.startsWith("Transcription:") && message.length > 150) {
+        const prefix = "Transcription: ";
+        const truncatedContent = message.substring(prefix.length, prefix.length + 147) + "...";
+        displayMessage = prefix + truncatedContent;
+        fullMessage = message;
+        notification.title = message; // Show full message on hover
+    }
+    
+    notification.textContent = displayMessage;
+    
+    // Add view full button for longer messages
+    if (message.length > 150) {
+        notification.style.cursor = 'pointer';
+        notification.addEventListener('click', () => {
+            alert(fullMessage);
+        });
+    }
+    
+    document.body.appendChild(notification);
+    
+    // Auto-hide after duration
     setTimeout(() => {
-        elements.notification.classList.add('hidden');
-    }, 5000);
+        notification.classList.add('fade-out');
+        setTimeout(() => {
+            notification.remove();
+        }, 500);
+    }, duration);
 }
 
 function scrollToActiveStep() {
-    // Scroll to the active step with smooth behavior
-    setTimeout(() => {
-        const activeStep = document.querySelector('.step-content.active');
-        if (activeStep) {
-            // Get the element's position relative to the viewport
-            const rect = activeStep.getBoundingClientRect();
-            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-            
-            // Calculate position to scroll to (centered in viewport)
-            const targetY = rect.top + scrollTop - (window.innerHeight / 2) + (rect.height / 2);
-            
-            // Smooth scroll to target
-            window.scrollTo({
-                top: targetY,
-                behavior: 'smooth'
-            });
-            
-            // Highlight the active step in the navigation
-            highlightActiveStepIndicator();
-        }
-    }, 100);
+    // Find the active step based on the current path
+    const activePath = router.currentPath;
+    const activeSectionId = activePath.substring(1); // Remove the leading slash
+    const activeSection = document.getElementById(activeSectionId);
+    
+    if (activeSection) {
+        const headerOffset = 80; // Adjust based on your header height
+        const elementPosition = activeSection.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+        
+        window.scrollTo({
+            top: offsetPosition,
+            behavior: 'smooth'
+        });
+    }
 }
 
 function highlightActiveStepIndicator() {
-    // Find the active step content
-    const activeStepContent = document.querySelector('.step-content.active');
-    if (!activeStepContent) return;
-    
-    // Get the step number from the ID (e.g., "step-2" -> 2)
-    const stepId = activeStepContent.id;
-    const stepNumber = parseInt(stepId.split('-')[1]);
-    
-    // Highlight the corresponding step in the navigation
-    const stepIndicators = document.querySelectorAll('.step');
-    stepIndicators.forEach((step, index) => {
-        step.classList.remove('active');
-        if (index + 1 === stepNumber) {
+    const steps = document.querySelectorAll('.step');
+    steps.forEach(step => {
+        const path = step.dataset.path;
+        if (path === router.currentPath) {
             step.classList.add('active');
+        } else {
+            step.classList.remove('active');
         }
     });
 }
@@ -296,10 +426,13 @@ function updateActiveStep(stepNumber) {
     // Update state
     state.activeStep = stepNumber;
     
-    // Update step indicators
+    // Find the path for this step number
+    const path = Object.entries(router.routes).find(([_, route]) => route.step === stepNumber)?.[0];
+    
+    // Update step indicators (now using data-path instead of data-step)
     document.querySelectorAll('.step').forEach(step => {
         step.classList.remove('active');
-        if (parseInt(step.dataset.step) === stepNumber) {
+        if (step.dataset.path === path) {
             step.classList.add('active');
         }
     });
@@ -310,8 +443,10 @@ function updateActiveStep(stepNumber) {
         section.style.opacity = '0';
     });
 
-    // Show active section with transition
-    const activeSection = document.getElementById(`step-${stepNumber}`);
+    // Show active section with transition - using the path-based ID now
+    const activeSectionId = path?.substring(1); // Remove the leading slash
+    const activeSection = document.getElementById(activeSectionId);
+    
     if (activeSection) {
         setTimeout(() => {
             activeSection.classList.add('active');
@@ -321,48 +456,29 @@ function updateActiveStep(stepNumber) {
                 activeSection.classList.remove('highlight-transition');
             }, 1000);
         }, 100);
+    } else {
+        console.error(`Could not find section with ID: ${activeSectionId}`);
     }
 
-    // Update URL hash
-    window.location.hash = `#step${stepNumber}`;
+    // Update URL without triggering a new navigation
+    if (path && router.currentPath !== path) {
+        window.history.replaceState({}, '', path);
+        router.currentPath = path;
+    }
 
     // Scroll to active section
-    scrollToActiveStep(stepNumber);
+    scrollToActiveStep();
+    
+    // Update completion indicators
+    updateStepIndicators();
 }
 
 function goToStep(stepNumber) {
-    if (stepNumber === state.activeStep) return;
-    
-    console.log(`Navigating from step ${state.activeStep} to step ${stepNumber}`);
-    
-    // Save inputs from current step
-    saveStepInputs(state.activeStep);
-    
-    // Show loading transition between steps
-    simulateStepTransition(state.activeStep, stepNumber, () => {
-        // Update active step after loading completes
-        updateActiveStep(stepNumber);
-        
-        // Load inputs for the new step
-        loadStepInputs(stepNumber);
-        
-        // Perform step-specific actions
-        if (stepNumber === 5) {
-            console.log('Checking if repository info needs to be auto-populated');
-            console.log(`Saved inputs for step 5: ${JSON.stringify(state.savedInputs[5])}`);
-            
-            if (!state.savedInputs[5].name || !state.savedInputs[5].description) {
-                console.log('No saved repo info found, calling generateRepositoryInfo()');
-                // Auto-populate repository info when reaching Step 5 if not already populated
-                generateRepositoryInfo();
-            } else {
-                console.log('Repository info already exists, skipping auto-population');
-            }
-        }
-        
-        // Scroll to the active step
-        scrollToActiveStep();
-    });
+    // Find the path for the given step number
+    const path = Object.entries(router.routes).find(([_, route]) => route.step === stepNumber)?.[0];
+    if (path) {
+        router.navigate(path);
+    }
 }
 
 // API functions
@@ -509,93 +625,170 @@ function createBigGoalSection(goal) {
 }
 
 function renderBigGoals() {
-    elements.bigGoalsContainer.innerHTML = '';
+    console.log('Rendering big goals:', state.bigGoals);
     
+    const tasksContainer = elements.tasksContainer;
+    if (!tasksContainer) {
+        console.error('Tasks container not found');
+        return;
+    }
+    
+    tasksContainer.innerHTML = '';
+    
+    if (!state.bigGoals || state.bigGoals.length === 0) {
+        tasksContainer.innerHTML = '<p class="no-goals-message">No high-level tasks available.</p>';
+        return;
+    }
+
     state.bigGoals.forEach(goal => {
-        const goalElement = createGoalElement(goal);
-        elements.bigGoalsContainer.appendChild(goalElement);
+        const section = document.createElement('div');
+        section.className = 'goal-item';
+        section.dataset.goalId = goal.id;
+        
+        section.innerHTML = `
+            <div class="goal-header">
+                <h3>${goal.title}</h3>
+            </div>
+            <div class="goal-description">${goal.description || ''}</div>
+        `;
+        
+        tasksContainer.appendChild(section);
     });
-    
-    // Add "Add Goal" button
-    const addButton = document.createElement('button');
-    addButton.className = 'btn secondary';
-    addButton.innerHTML = '<i class="material-icons">add</i> Add High-Level Task';
-    addButton.addEventListener('click', addNewBigGoal);
-    
-    elements.bigGoalsContainer.appendChild(addButton);
 }
 
 function renderSmallGoals() {
-    elements.smallGoalsContainer.innerHTML = '';
+    console.log('Rendering small goals:', state.smallGoals);
     
-    state.bigGoals.forEach(bigGoal => {
-        const section = createBigGoalSection(bigGoal);
-        const container = section.querySelector('.small-goals-container');
+    const smallGoalsContainer = document.getElementById('small-goals-container');
+    if (!smallGoalsContainer) {
+        console.error('Could not find small-goals-container');
+        return;
+    }
+
+    // Clear existing content
+    smallGoalsContainer.innerHTML = '';
+
+    // If there are no big goals, show a message
+    if (!state.bigGoals || state.bigGoals.length === 0) {
+        console.log('No big goals found in state');
+        smallGoalsContainer.innerHTML = '<p class="no-goals-message">No tasks available.</p>';
+        return;
+    }
+
+    // Create sections for each big goal and its sub-tasks
+    state.bigGoals.forEach((bigGoal) => {
+        console.log(`Processing big goal:`, bigGoal);
         
-        // Get small goals for this big goal
+        const section = document.createElement('div');
+        section.className = 'big-goal-section';
+        section.dataset.id = bigGoal.id;
+        
+        // Add the big goal as a card
+        const bigGoalCard = document.createElement('div');
+        bigGoalCard.className = 'big-goal-card';
+        bigGoalCard.innerHTML = `
+            <div class="goal-header">
+                <h3>${bigGoal.title}</h3>
+                <span class="goal-type">High-Level Task</span>
+            </div>
+            ${bigGoal.description ? `<div class="goal-description">${bigGoal.description}</div>` : ''}
+        `;
+        section.appendChild(bigGoalCard);
+        
+        // Create container for small goals
+        const smallGoalsWrapper = document.createElement('div');
+        smallGoalsWrapper.className = 'small-goals-wrapper';
+        
+        // Add small goals if they exist
         const smallGoals = state.smallGoals[bigGoal.id] || [];
+        console.log(`Small goals for big goal ${bigGoal.id}:`, smallGoals);
         
-        smallGoals.forEach(smallGoal => {
-            const goalElement = createGoalElement(smallGoal, true);
-            container.appendChild(goalElement);
-        });
+        if (smallGoals.length > 0) {
+            smallGoals.forEach(smallGoal => {
+                const smallGoalCard = document.createElement('div');
+                smallGoalCard.className = 'small-goal-card';
+                smallGoalCard.dataset.id = smallGoal.id;
+                
+                smallGoalCard.innerHTML = `
+                    <div class="goal-header">
+                        <h4>${smallGoal.title}</h4>
+                        <div class="goal-meta">
+                            <span class="goal-type">Sub-Task</span>
+                            <span class="goal-id">#${smallGoal.id}</span>
+                        </div>
+                    </div>
+                    ${smallGoal.description ? `<div class="goal-description">${smallGoal.description}</div>` : ''}
+                `;
+                
+                smallGoalsWrapper.appendChild(smallGoalCard);
+            });
+        } else {
+            const noTasksMsg = document.createElement('p');
+            noTasksMsg.className = 'no-tasks-message';
+            noTasksMsg.textContent = 'No sub-tasks available.';
+            smallGoalsWrapper.appendChild(noTasksMsg);
+        }
         
-        // Add "Add Small Goal" button
-        const addButton = document.createElement('button');
-        addButton.className = 'btn secondary';
-        addButton.innerHTML = '<i class="material-icons">add_task</i> Add Sub-Task';
-        addButton.dataset.bigGoalId = bigGoal.id;
-        addButton.addEventListener('click', (e) => {
-            const bigGoalId = parseInt(e.currentTarget.dataset.bigGoalId);
-            addNewSmallGoal(bigGoalId);
-        });
+        // Add a single modify using voice button at the top
+        const topControlsContainer = document.createElement('div');
+        topControlsContainer.className = 'top-task-controls';
+        topControlsContainer.innerHTML = `
+            <button class="btn modify-tasks-voice" title="Modify tasks using voice">
+                <i class="material-icons">mic</i> Modify with Voice
+            </button>
+        `;
+        smallGoalsWrapper.appendChild(topControlsContainer);
         
-        container.appendChild(addButton);
-        elements.smallGoalsContainer.appendChild(section);
+        section.appendChild(smallGoalsWrapper);
+        smallGoalsContainer.appendChild(section);
     });
 }
 
 function renderIssuesPreview() {
-    elements.issuesPreviewContainer.innerHTML = '';
+    elements.resultsContainer.innerHTML = '';
     
-    let allSmallGoals = [];
+    // Repository info
+    const repoSection = document.createElement('div');
+    repoSection.className = 'result-section';
     
-    // Collect all small goals
-    state.bigGoals.forEach(bigGoal => {
-        const smallGoals = state.smallGoals[bigGoal.id] || [];
-        allSmallGoals = allSmallGoals.concat(smallGoals.map(goal => ({
-            ...goal,
-            bigGoalTitle: bigGoal.title
-        })));
+    const repoHeader = document.createElement('h3');
+    repoHeader.innerHTML = '<i class="material-icons">code</i> Repository Created';
+    
+    const repoUrl = document.createElement('a');
+    repoUrl.href = state.repository.url;
+    repoUrl.textContent = state.repository.url;
+    repoUrl.target = '_blank';
+    
+    repoSection.appendChild(repoHeader);
+    repoSection.appendChild(repoUrl);
+    
+    // Issues info
+    const issuesSection = document.createElement('div');
+    issuesSection.className = 'result-section';
+    
+    const issuesHeader = document.createElement('h3');
+    issuesHeader.innerHTML = '<i class="material-icons">task_alt</i> Issues Created';
+    
+    const issuesList = document.createElement('ul');
+    issuesList.className = 'issues-list';
+    
+    state.issues.forEach(issue => {
+        const issueItem = document.createElement('li');
+        
+        const issueLink = document.createElement('a');
+        issueLink.href = issue.url;
+        issueLink.innerHTML = `<i class="material-icons" style="font-size: 16px; vertical-align: middle;">task</i> ${issue.title}`;
+        issueLink.target = '_blank';
+        
+        issueItem.appendChild(issueLink);
+        issuesList.appendChild(issueItem);
     });
     
-    // Render each issue preview
-    allSmallGoals.forEach(goal => {
-        const issueElement = document.createElement('div');
-        issueElement.className = 'goal-item';
-        
-        const issueHeader = document.createElement('div');
-        issueHeader.className = 'goal-header';
-        
-        const issueTitle = document.createElement('div');
-        issueTitle.className = 'goal-title';
-        issueTitle.innerHTML = `<i class="material-icons">label</i> ${goal.title}`;
-        
-        const issueBody = document.createElement('div');
-        issueBody.className = 'goal-body';
-        
-        const issueDescription = document.createElement('div');
-        issueDescription.className = 'issue-description';
-        issueDescription.innerHTML = `${goal.description} <br><br><small><i class="material-icons" style="font-size: 16px; vertical-align: middle;">category</i> Part of: ${goal.bigGoalTitle}</small>`;
-        
-        issueHeader.appendChild(issueTitle);
-        issueBody.appendChild(issueDescription);
-        
-        issueElement.appendChild(issueHeader);
-        issueElement.appendChild(issueBody);
-        
-        elements.issuesPreviewContainer.appendChild(issueElement);
-    });
+    issuesSection.appendChild(issuesHeader);
+    issuesSection.appendChild(issuesList);
+    
+    elements.resultsContainer.appendChild(repoSection);
+    elements.resultsContainer.appendChild(issuesSection);
 }
 
 function renderResults() {
@@ -647,82 +840,44 @@ function renderResults() {
 
 // Actions
 async function analyzePrompt() {
-    const promptInput = document.getElementById('prompt-input').value.trim();
+    const promptInput = elements.promptInput.value.trim();
+    
     if (!promptInput) {
-        showNotification('Please enter a project description', 'error');
+        showNotification('Please enter a project description', 'warning');
         return;
     }
-
-    showLoading('Analyzing prompt and generating high-level tasks...', 5);
+    
+    showLoading('Analyzing your project description...', 10);
     
     try {
-        // Show initial preparation phase
-        const phases = [
-            { percentage: 15, message: 'Analyzing project description...' },
-            { percentage: 30, message: 'Identifying key requirements...' },
-            { percentage: 45, message: 'Generating high-level tasks...' }
-        ];
+        console.log('Sending prompt for analysis:', promptInput);
         
-        // Simulate phase progress
-        for (const phase of phases) {
-            await new Promise(resolve => {
-                setTimeout(() => {
-                    elements.loadingMessage.textContent = phase.message;
-                    updateLoadingPercentage(phase.percentage);
-                    resolve();
-                }, 500);
-            });
-        }
-        
-        // Now make the actual API call
+        // Make API request to analyze the prompt
         const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: promptInput })
         });
-
-        elements.loadingMessage.textContent = 'Processing task data...';
-        updateLoadingPercentage(75);
-
-        if (!response.ok) throw new Error('Failed to analyze prompt');
+        
+        if (!response.ok) {
+            throw new Error('Failed to analyze prompt');
+        }
         
         const data = await response.json();
-        updateLoadingPercentage(85);
-        elements.loadingMessage.textContent = 'Finalizing task organization...';
-        
-        if (!data.big_goals || data.big_goals.length === 0) {
-            hideLoading();
-            showNotification('No goals were generated. Please try again with a more detailed description.', 'error');
-            return;
-        }
+        console.log('API Response data:', data);
 
-        // Update big goals container
-        const container = document.getElementById('big-goals-container');
-        container.innerHTML = ''; // Clear existing goals
+        // Update taskState with the response data
+        taskState.updateTasks(data);
         
-        updateLoadingPercentage(90);
+        // Navigate to the tasks page
+        router.navigate('/tasks');
+        showNotification('Tasks generated successfully!', 'success');
         
-        data.big_goals.forEach((goal, index) => {
-            container.appendChild(createGoalElement(goal, index + 1));
-        });
-
-        // Save step data and update state
-        state.bigGoals = data.big_goals;
-        saveStepInputs(3, { goals: data.big_goals });
-        
-        elements.loadingMessage.textContent = 'Tasks created successfully!';
-        updateLoadingPercentage(100);
-        
-        // Hide loading and transition to next step
-        setTimeout(() => {
-            hideLoading();
-            updateActiveStep(3);
-            showNotification('Tasks generated successfully!', 'success');
-        }, 500);
-    } catch (error) {
-        console.error('Error:', error);
         hideLoading();
-        showNotification('Failed to analyze prompt. Please try again.', 'error');
+    } catch (error) {
+        console.error('Error in analyzePrompt:', error);
+        hideLoading();
+        showNotification(`Failed to analyze prompt: ${error.message}`, 'error');
     }
 }
 
@@ -820,50 +975,50 @@ async function breakDownGoals() {
 }
 
 async function createRepository() {
-    const repoName = elements.repoNameInput.value.trim();
-    const repoDescription = elements.repoDescriptionInput.value.trim();
+    console.log('Starting repository creation...');
+    console.log('Elements:', elements);
     
-    if (!repoName) {
-        showNotification('Repository name is required', 'warning');
+    // Check if elements are available
+    if (!elements.repoNameInput) {
+        console.error('Repository name input element not found!');
+        showNotification('Error: Repository name input element not found', 'error');
         return;
     }
     
-    // Save repo info to state
-    state.savedInputs[5] = {
-        name: repoName,
-        description: repoDescription
-    };
-    saveStateToLocalStorage();
+    const repoName = elements.repoNameInput.value.trim();
+    const repoDesc = elements.repoDescriptionInput ? elements.repoDescriptionInput.value.trim() : '';
+    
+    console.log('Inputs:', { repoName, repoDesc });
+    
+    if (!repoName) {
+        console.warn('Repository name is empty');
+        showNotification('Please enter a repository name', 'warning');
+        return;
+    }
+    
+    showLoading('Creating GitHub repository...', 10);
     
     try {
-        showLoading('Creating GitHub repository...', 10);
-        
-        // Simulate preparing repository creation
-        updateLoadingPercentage(30);
-        
-        const result = await fetchAPI('create-repository', 'POST', {
+        const payload = {
             repo_name: repoName,
-            repo_description: repoDescription
-        });
+            repo_description: repoDesc
+        };
+        console.log('Sending repository creation payload:', payload);
         
-        updateLoadingPercentage(80);
+        const result = await fetchAPI('create-repository', 'POST', payload);
         
+        console.log('Repository created successfully:', result);
         state.repository = result.repository;
-        updateStepCompletion(5, true);
+        updateStepCompletion(4, true);
         saveStateToLocalStorage();
         
-        renderIssuesPreview();
-        updateLoadingPercentage(100);
-        
-        // Hide loading with a small delay for visual feedback
-        setTimeout(() => {
-            hideLoading();
-            goToStep(6);
-            showNotification('Repository created successfully!', 'success');
-        }, 200);
+        // Navigate to create issues page
+        router.navigate('/create-issues');
+        showNotification('Repository created successfully!', 'success');
     } catch (error) {
-        // Error is already handled in fetchAPI
+        console.error('Repository creation error:', error);
         hideLoading();
+        showNotification('Failed to create repository: ' + error.message, 'error');
     }
 }
 
@@ -876,46 +1031,82 @@ async function createIssues() {
     try {
         showLoading('Creating GitHub issues...', 10);
         
-        let allSmallGoals = [];
+        // Get tasks from taskState
+        const tasks = taskState.getTasks();
+        if (!tasks || tasks.length === 0) {
+            throw new Error('No tasks available to create issues');
+        }
+
+        console.log('Creating issues for tasks:', tasks);
         
-        // Collect all small goals
-        state.bigGoals.forEach(bigGoal => {
-            const smallGoals = state.smallGoals[bigGoal.id] || [];
-            allSmallGoals = allSmallGoals.concat(smallGoals);
-        });
+        // Process each task sequentially
+        const totalTasks = tasks.length;
+        const progressPerTask = 80 / totalTasks; // 80% of progress bar for task processing
         
-        updateLoadingPercentage(20);
-        
-        // If we have many goals, simulate incremental progress
-        if (allSmallGoals.length > 5) {
-            updateLoadingPercentage(30);
-            await new Promise(resolve => setTimeout(resolve, 300));
-            updateLoadingPercentage(40);
+        for (let i = 0; i < totalTasks; i++) {
+            const task = tasks[i];
+            const baseProgress = 10 + (i * progressPerTask);
+            
+            // Update loading message
+            elements.loadingMessage.textContent = `Creating issue for: "${task.title}"`;
+            updateLoadingPercentage(baseProgress);
+            
+            // Create parent issue
+            const repoName = state.repository.name;
+            const parentIssue = await fetch(`/api/repository/${repoName}/issues`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    title: task.title,
+                    body: task.description 
+                })
+            }).then(res => res.json());
+            
+            if (!parentIssue || parentIssue.error) {
+                throw new Error(`Failed to create parent issue: ${parentIssue?.error || 'Unknown error'}`);
+            }
+            
+            console.log('Created parent issue:', parentIssue);
+            
+            // Create sub-task issues
+            if (task.sub_tasks && task.sub_tasks.length > 0) {
+                for (const subTask of task.sub_tasks) {
+                    elements.loadingMessage.textContent = `Creating sub-task: "${subTask.title}"`;
+                    
+                    const subTaskIssue = await fetch(`/api/repository/${repoName}/issues`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: subTask.title,
+                            body: `${subTask.description}\n\nParent: #${parentIssue.number}`
+                        })
+                    }).then(res => res.json());
+                    
+                    if (!subTaskIssue || subTaskIssue.error) {
+                        showNotification(`Failed to create sub-task: ${subTask.title}`, 'warning');
+                    }
+                    
+                    console.log('Created sub-task issue:', subTaskIssue);
+                }
+            }
+            
+            updateLoadingPercentage(baseProgress + progressPerTask);
         }
         
-        const result = await fetchAPI('create-issues', 'POST', {
-            repo_name: state.repository.name,
-            goals: allSmallGoals
-        });
+        elements.loadingMessage.textContent = 'Finalizing issue creation...';
+        updateLoadingPercentage(95);
         
-        updateLoadingPercentage(80);
-        
-        state.issues = result.issues;
-        updateStepCompletion(6, true);
-        saveStateToLocalStorage();
-        
-        renderResults();
-        updateLoadingPercentage(100);
-        
-        // Hide loading with a small delay for visual feedback
+        // Update UI and show success message
         setTimeout(() => {
             hideLoading();
-            goToStep(7); // Move to results view
-            showNotification('Issues created successfully!', 'success');
-        }, 200);
+            router.navigate('/results');
+            showNotification('All issues created successfully!', 'success');
+        }, 500);
+        
     } catch (error) {
-        // Error is already handled in fetchAPI
+        console.error('Error creating issues:', error);
         hideLoading();
+        showNotification(error.message || 'Failed to create issues', 'error');
     }
 }
 
@@ -938,7 +1129,7 @@ function addNewBigGoal() {
     
     // Scroll to the new element
     setTimeout(() => {
-        const lastGoal = elements.bigGoalsContainer.querySelector('.goal-item:last-of-type');
+        const lastGoal = elements.tasksContainer.querySelector('.goal-item:last-of-type');
         if (lastGoal) {
             lastGoal.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -967,7 +1158,7 @@ function addNewSmallGoal(bigGoalId) {
     
     // Scroll to the new element
     setTimeout(() => {
-        const sections = elements.smallGoalsContainer.querySelectorAll('.big-goal-section');
+        const sections = elements.tasksContainer.querySelectorAll('.big-goal-section');
         sections.forEach(section => {
             if (section.dataset.id == bigGoalId) {
                 const lastGoal = section.querySelector('.goal-item:last-of-type');
@@ -1012,8 +1203,8 @@ function resetApplication() {
     state.savedInputs = {
         1: '',
         2: '',
-        3: [],
-        4: {},
+        3: { bigGoals: [], smallGoals: {} },
+        4: { name: '', description: '' },
         5: { name: '', description: '' }
     };
     
@@ -1051,59 +1242,30 @@ function setupEventListeners() {
         });
     }
     
-    // Update button texts with icons
-    elements.analyzeBtn.innerHTML = '<i class="material-icons">auto_awesome</i> Analyze & Create Tasks';
-    elements.backToPromptBtn.innerHTML = '<i class="material-icons">arrow_back</i> Back';
-    elements.proceedToSmallGoalsBtn.innerHTML = 'Break Down Tasks <i class="material-icons">arrow_forward</i>';
-    elements.backToBigGoalsBtn.innerHTML = '<i class="material-icons">arrow_back</i> Back';
-    elements.proceedToRepoBtn.innerHTML = 'Create Repository <i class="material-icons">arrow_forward</i>';
-    elements.backToSmallGoalsBtn.innerHTML = '<i class="material-icons">arrow_back</i> Back';
-    elements.createRepoBtn.innerHTML = '<i class="material-icons">add_circle</i> Create Repository';
-    elements.backToRepoBtn.innerHTML = '<i class="material-icons">arrow_back</i> Back';
-    elements.createIssuesBtn.innerHTML = '<i class="material-icons">assignment_turned_in</i> Create Issues';
-    elements.startOverBtn.innerHTML = '<i class="material-icons">refresh</i> Start New Project';
-
     // Voice input and instructions navigation
-    const skipToInstructionsBtn = document.getElementById('skip-to-instructions');
-    if (skipToInstructionsBtn) {
-        skipToInstructionsBtn.addEventListener('click', () => {
-            // Mark step 1 as completed even if skipped
-            updateStepCompletion(1, true);
-            goToStep(2);
-        });
-    }
-    
-    const backToVoiceBtn = document.getElementById('back-to-voice-btn');
-    if (backToVoiceBtn) {
-        backToVoiceBtn.addEventListener('click', () => goToStep(1));
-    }
+    elements.skipToInstructionsBtn.addEventListener('click', () => router.navigate('/instructions'));
+    elements.backToVoiceBtn.addEventListener('click', () => router.navigate('/new-proj'));
 
     // Navigation between steps
-    elements.analyzeBtn.addEventListener('click', analyzePrompt);
-    elements.backToPromptBtn.addEventListener('click', () => goToStep(2));
-    elements.proceedToSmallGoalsBtn.addEventListener('click', breakDownGoals);
-    elements.backToBigGoalsBtn.addEventListener('click', () => goToStep(3));
-    elements.proceedToRepoBtn.addEventListener('click', () => goToStep(5));
-    elements.backToSmallGoalsBtn.addEventListener('click', () => goToStep(4));
-    elements.createRepoBtn.addEventListener('click', createRepository);
-    elements.backToRepoBtn.addEventListener('click', () => goToStep(5));
+    elements.analyzeBtn.addEventListener('click', async () => {
+        await analyzePrompt();
+        router.navigate('/tasks');
+    });
+    elements.backToPromptBtn.addEventListener('click', () => router.navigate('/instructions'));
+    elements.proceedToRepoBtn.addEventListener('click', () => router.navigate('/new-repo'));
+    elements.createRepoBtn.addEventListener('click', async () => {
+        await createRepository();
+        router.navigate('/create-issues');
+    });
     elements.createIssuesBtn.addEventListener('click', createIssues);
     elements.startOverBtn.addEventListener('click', resetApplication);
     
-    // Step indicator navigation - allow clicking on any step with data
+    // Step indicator navigation
     elements.steps.forEach((step, index) => {
-        step.addEventListener('click', () => {
-            const targetStep = index + 1;
-            
-            // Allow navigation if the step is already completed, has data, or is a previous step
-            if (state.stepsCompleted[targetStep] || hasDataForStep(targetStep) || targetStep < state.activeStep) {
-                goToStep(targetStep);
-            } else {
-                // Animate the step to indicate it's not available yet
-                step.classList.add('unavailable');
-                setTimeout(() => {
-                    step.classList.remove('unavailable');
-                }, 800);
+        step.addEventListener('click', (e) => {
+            const path = e.currentTarget.dataset.path;
+            if (path) {
+                router.navigate(path);
             }
         });
     });
@@ -1146,6 +1308,64 @@ function setupEventListeners() {
         button.classList.add('btn-ripple');
         button.addEventListener('click', createRippleEffect);
     });
+
+    // Mode selector event listeners
+    elements.newProjectMode.addEventListener('click', () => {
+        elements.newProjectMode.classList.add('active');
+        elements.existingProjectMode.classList.remove('active');
+        elements.repoSelector.classList.add('hidden');
+        hideAllSteps();
+        showStep(1);
+    });
+
+    elements.existingProjectMode.addEventListener('click', () => {
+        elements.existingProjectMode.classList.add('active');
+        elements.newProjectMode.classList.remove('active');
+        elements.repoSelector.classList.remove('hidden');
+        hideAllSteps();
+        loadRepositories();
+    });
+
+    // Repository search functionality
+    elements.repoSearch.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        elements.reposList.querySelectorAll('.repository-item').forEach(item => {
+            const repoName = item.querySelector('.repository-name').textContent.toLowerCase();
+            const repoDesc = item.querySelector('.repository-description').textContent.toLowerCase();
+            item.style.display = repoName.includes(searchTerm) || repoDesc.includes(searchTerm) ? '' : 'none';
+        });
+    });
+
+    // Load repositories button
+    elements.loadReposBtn.addEventListener('click', loadRepositories);
+
+    // Create repository event listener
+    const createRepoBtn = document.getElementById('create-repo-btn');
+    if (createRepoBtn) {
+        console.log('Setting up create-repo-btn event listener');
+        createRepoBtn.addEventListener('click', async () => {
+            console.log('Create repository button clicked');
+            // Validate form fields
+            const repoName = document.getElementById('repo-name').value.trim();
+            const repoDesc = document.getElementById('repo-description').value.trim();
+            
+            console.log('Form values:', { repoName, repoDesc });
+            
+            if (!repoName) {
+                showNotification('Please enter a repository name', 'warning');
+                return;
+            }
+            
+            try {
+                await createRepository();
+            } catch (error) {
+                console.error('Error in create repo handler:', error);
+                showNotification('Failed to create repository: ' + error.message, 'error');
+            }
+        });
+    } else {
+        console.error('Create repository button not found!');
+    }
 }
 
 function createRippleEffect(event) {
@@ -1488,46 +1708,23 @@ function init() {
     setupSidebar();
     setupGraph();
     
+    // Initialize router
+    router.init();
+    
     // Show tree view by default
     switchView('tree');
     
     // Load saved state from localStorage
     loadStateFromLocalStorage();
     
-    // If no saved state, start at step 1
-    if (!hasDataForStep(1)) {
-        goToStep(1);
-    } else {
-        // Find the furthest step with data
-        let furthestStep = 1;
-        for (let i = 6; i >= 1; i--) {
-            if (state.stepsCompleted[i] || hasDataForStep(i)) {
-                furthestStep = i;
-                break;
-            }
-        }
-        goToStep(furthestStep);
-    }
-    
-    // Add some pleasant animations
-    document.querySelectorAll('.btn').forEach(btn => {
-        btn.addEventListener('mouseenter', () => {
-            btn.style.transform = 'translateY(-3px)';
-        });
-        
-        btn.addEventListener('mouseleave', () => {
-            btn.style.transform = '';
-        });
-    });
-    
-    // Update completion indicators
-    updateStepIndicators();
-
-    // Set initial theme
-    if (state.theme === 'light') {
-        document.body.classList.add('light-theme');
-        elements.themeToggle.querySelector('i').textContent = 'light_mode';
-    }
+    // Debug repository form when it's shown
+    router.routes['/new-repo'].onEnter = () => {
+        updateActiveStep(4);
+        console.log('Repository form shown - checking elements:');
+        console.log('repo-name element:', document.getElementById('repo-name'));
+        console.log('repo-description element:', document.getElementById('repo-description'));
+        console.log('create-repo-btn element:', document.getElementById('create-repo-btn'));
+    };
 }
 
 // Set up sidebar toggle functionality
@@ -1757,16 +1954,16 @@ function saveStepInputs(stepNum, data) {
             break;
         case 3:
             // Save big goals
-            if (data && data.goals) {
-                state.savedInputs[3] = data.goals;
+            if (data && data.bigGoals) {
+                state.savedInputs[3] = data.bigGoals;
             } else {
                 state.savedInputs[3] = [...state.bigGoals];
             }
             break;
         case 4:
             // Save small goals
-            if (data && data.small_goals) {
-                state.savedInputs[4] = data.small_goals;
+            if (data && data.smallGoals) {
+                state.savedInputs[4] = data.smallGoals;
             } else {
                 state.savedInputs[4] = { ...state.smallGoals };
             }
@@ -1828,7 +2025,10 @@ function loadStepInputs(stepNum) {
             }
             break;
         case 6:
-            renderIssuesPreview();
+            // Render results if we have repository and issues
+            if (state.repository && state.issues && state.issues.length > 0) {
+                renderResults();
+            }
             break;
     }
 }
@@ -1841,9 +2041,9 @@ function saveStateToLocalStorage() {
             bigGoals: state.bigGoals,
             smallGoals: state.smallGoals,
             repository: state.repository,
+            issues: state.issues,
             stepsCompleted: state.stepsCompleted,
             savedInputs: state.savedInputs,
-            transcription: state.transcription,
             transcription: state.transcription
         };
         
@@ -1866,11 +2066,12 @@ function loadStateFromLocalStorage() {
             state.bigGoals = parsedState.bigGoals || [];
             state.smallGoals = parsedState.smallGoals || {};
             state.repository = parsedState.repository || null;
+            state.issues = parsedState.issues || [];
             state.stepsCompleted = parsedState.stepsCompleted || { 
                 1: false, 2: false, 3: false, 4: false, 5: false, 6: false 
             };
             state.savedInputs = parsedState.savedInputs || { 
-                1: '', 2: '', 3: [], 4: {}, 5: { name: '', description: '' } 
+                1: '', 2: '', 3: { bigGoals: [], smallGoals: {} }, 4: { name: '', description: '' }, 5: { name: '', description: '' } 
             };
             state.transcription = parsedState.transcription || '';
             
@@ -1887,6 +2088,16 @@ function loadStateFromLocalStorage() {
             // If we have big goals, mark step 3 as completed
             if (state.bigGoals.length > 0) {
                 state.stepsCompleted[3] = true;
+            }
+            
+            // If we have a repository, mark step 5 as completed
+            if (state.repository) {
+                state.stepsCompleted[5] = true;
+            }
+            
+            // If we have issues, mark step 6 as completed
+            if (state.issues && state.issues.length > 0) {
+                state.stepsCompleted[6] = true;
             }
             
             // Update UI
@@ -2004,4 +2215,1221 @@ function redoRecording() {
     state.audioChunks = [];
     state.transcription = '';
     state.savedInputs[1] = '';
-} 
+}
+
+function renderTasks() {
+    const container = document.getElementById('tasks-container');
+    container.innerHTML = '';
+    
+    // Render high-level tasks
+    state.bigGoals.forEach(goal => {
+        const section = document.createElement('div');
+        section.className = 'task-section';
+        section.dataset.id = goal.id;
+        
+        // Create high-level task header
+        const header = document.createElement('div');
+        header.className = 'task-header';
+        header.innerHTML = `
+            <div class="task-input-group">
+                <input type="text" class="task-title" value="${goal.title}" placeholder="Task title">
+                <textarea class="task-description" placeholder="Task description">${goal.description}</textarea>
+            </div>
+            <div class="task-actions">
+                <button class="btn-icon voice-ai" title="Voice AI Chat">
+                    <i class="material-icons">mic</i>
+                </button>
+                <button class="btn-icon generate-subtasks" title="Generate Sub-tasks with AI">
+                    <i class="material-icons">auto_awesome</i>
+                </button>
+                <button class="btn-icon add-subtask" title="Add Sub-task">
+                    <i class="material-icons">add_task</i>
+                </button>
+                <button class="btn-icon delete-task" title="Delete Task">
+                    <i class="material-icons">delete</i>
+                </button>
+            </div>
+        `;
+        
+        // Create sub-tasks container
+        const subTasksContainer = document.createElement('div');
+        subTasksContainer.className = 'subtasks-container';
+        
+        // Render sub-tasks if they exist
+        const subTasks = state.smallGoals[goal.id] || [];
+        subTasks.forEach(subTask => {
+            const subTaskElement = document.createElement('div');
+            subTaskElement.className = 'subtask';
+            subTaskElement.dataset.id = subTask.id;
+            subTaskElement.innerHTML = `
+                <div class="task-input-group">
+                    <input type="text" class="task-title" value="${subTask.title}" placeholder="Sub-task title">
+                    <textarea class="task-description" placeholder="Sub-task description">${subTask.description}</textarea>
+                </div>
+                <div class="task-actions">
+                    <button class="btn-icon delete-subtask" title="Delete Sub-task">
+                        <i class="material-icons">delete</i>
+                    </button>
+                </div>
+            `;
+            subTasksContainer.appendChild(subTaskElement);
+        });
+        
+        section.appendChild(header);
+        section.appendChild(subTasksContainer);
+        container.appendChild(section);
+    });
+    
+    // Add "Add Task" button
+    const addButton = document.createElement('button');
+    addButton.className = 'btn secondary add-task-btn';
+    addButton.innerHTML = '<i class="material-icons">add</i> Add High-Level Task';
+    addButton.addEventListener('click', addNewTask);
+    container.appendChild(addButton);
+    
+    // Add event listeners
+    addTaskEventListeners();
+}
+
+function addTaskEventListeners() {
+    // Add voice AI button handlers
+    document.querySelectorAll('.voice-ai').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent event bubbling
+            const taskSection = e.currentTarget.closest('.task-section');
+            const taskId = parseInt(taskSection.dataset.id);
+            
+            if (e.currentTarget.classList.contains('active')) {
+                stopVoiceChat(taskId);
+            } else {
+                startVoiceChat(taskId);
+            }
+        });
+    });
+    
+    // Add modify tasks voice button handlers
+    document.querySelectorAll('.modify-tasks-voice').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent event bubbling
+            if (e.currentTarget.classList.contains('recording')) {
+                stopTaskModificationRecording();
+            } else {
+                startTaskModificationRecording();
+            }
+        });
+    });
+    
+    // Add AI generation button handlers
+    document.querySelectorAll('.generate-subtasks').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const taskSection = e.target.closest('.task-section');
+            const taskId = parseInt(taskSection.dataset.id);
+            await generateSubtasksForTask(taskId);
+        });
+    });
+    
+    // Add sub-task button handlers
+    document.querySelectorAll('.add-subtask').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const taskSection = e.target.closest('.task-section');
+            const taskId = parseInt(taskSection.dataset.id);
+            addNewSubTask(taskId);
+        });
+    });
+    
+    // Delete task button handlers
+    document.querySelectorAll('.delete-task').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const taskSection = e.target.closest('.task-section');
+            const taskId = parseInt(taskSection.dataset.id);
+            deleteTask(taskId);
+        });
+    });
+    
+    // Delete sub-task button handlers
+    document.querySelectorAll('.delete-subtask').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const subtask = e.target.closest('.subtask');
+            const taskSection = subtask.closest('.task-section');
+            const taskId = parseInt(taskSection.dataset.id);
+            const subtaskId = parseInt(subtask.dataset.id);
+            deleteSubTask(taskId, subtaskId);
+        });
+    });
+    
+    // Input change handlers
+    document.querySelectorAll('.task-title, .task-description').forEach(input => {
+        input.addEventListener('change', saveTasksState);
+    });
+}
+
+function addNewTask() {
+    const newId = state.bigGoals.length > 0 
+        ? Math.max(...state.bigGoals.map(g => g.id)) + 1 
+        : 1;
+    
+    const newTask = {
+        id: newId,
+        title: 'New Task',
+        description: 'Describe this task'
+    };
+    
+    state.bigGoals.push(newTask);
+    state.smallGoals[newId] = [];
+    
+    renderTasks();
+}
+
+function addNewSubTask(taskId) {
+    if (!state.smallGoals[taskId]) {
+        state.smallGoals[taskId] = [];
+    }
+    
+    const newId = state.smallGoals[taskId].length > 0 
+        ? Math.max(...state.smallGoals[taskId].map(g => g.id)) + 1 
+        : 101;
+    
+    const newSubTask = {
+        id: newId,
+        title: 'New Sub-task',
+        description: 'Describe this sub-task'
+    };
+    
+    state.smallGoals[taskId].push(newSubTask);
+    renderTasks();
+}
+
+function deleteTask(taskId) {
+    state.bigGoals = state.bigGoals.filter(goal => goal.id !== taskId);
+    delete state.smallGoals[taskId];
+    renderTasks();
+}
+
+function deleteSubTask(taskId, subtaskId) {
+    if (state.smallGoals[taskId]) {
+        state.smallGoals[taskId] = state.smallGoals[taskId].filter(task => task.id !== subtaskId);
+        renderTasks();
+    }
+}
+
+function saveTasksState() {
+    // Save high-level tasks
+    state.bigGoals = Array.from(document.querySelectorAll('.task-section')).map(section => ({
+        id: parseInt(section.dataset.id),
+        title: section.querySelector('.task-header .task-title').value,
+        description: section.querySelector('.task-header .task-description').value
+    }));
+    
+    // Save sub-tasks
+    state.smallGoals = {};
+    document.querySelectorAll('.task-section').forEach(section => {
+        const taskId = parseInt(section.dataset.id);
+        state.smallGoals[taskId] = Array.from(section.querySelectorAll('.subtask')).map(subtask => ({
+            id: parseInt(subtask.dataset.id),
+            title: subtask.querySelector('.task-title').value,
+            description: subtask.querySelector('.task-description').value
+        }));
+    });
+    
+    // Save to step inputs
+    state.savedInputs[3] = {
+        bigGoals: state.bigGoals,
+        smallGoals: state.smallGoals
+    };
+}
+
+// Add new function to generate subtasks for a single task
+async function generateSubtasksForTask(taskId) {
+    const task = state.bigGoals.find(goal => goal.id === taskId);
+    if (!task) {
+        showNotification('Task not found', 'error');
+        return;
+    }
+
+    showLoading(`Generating sub-tasks for "${task.title}"...`, 5);
+    
+    try {
+        elements.loadingMessage.textContent = 'Analyzing task...';
+        updateLoadingPercentage(15);
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        const response = await fetch('/api/break-down-goal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                goal_id: task.id,
+                goal_title: task.title,
+                goal_description: task.description
+            })
+        });
+
+        updateLoadingPercentage(75);
+
+        if (!response.ok) throw new Error('Failed to break down task');
+        
+        const data = await response.json();
+        if (!data.smaller_goals || data.smaller_goals.length === 0) {
+            hideLoading();
+            showNotification(`No sub-tasks were generated for "${task.title}". Please try again.`, 'warning');
+            return;
+        }
+
+        // Initialize the array for this task if it doesn't exist
+        if (!state.smallGoals[task.id]) {
+            state.smallGoals[task.id] = [];
+        }
+
+        // Add the smaller goals to the state
+        state.smallGoals[task.id] = data.smaller_goals;
+        
+        elements.loadingMessage.textContent = 'Organizing sub-tasks...';
+        updateLoadingPercentage(90);
+        
+        // Render all tasks
+        renderTasks();
+
+        // Save step data
+        saveTasksState();
+        
+        elements.loadingMessage.textContent = 'Sub-tasks created successfully!';
+        updateLoadingPercentage(100);
+        
+        // Hide loading with a slight delay for visual feedback
+        setTimeout(() => {
+            hideLoading();
+            showNotification('Sub-tasks generated successfully!', 'success');
+        }, 500);
+    } catch (error) {
+        console.error('Error:', error);
+        hideLoading();
+        showNotification('Failed to generate sub-tasks. Please try again.', 'error');
+    }
+}
+
+// Add new function for real-time voice chat
+async function startVoiceChat(taskId) {
+    // If voice chat is active for this task, stop it
+    if (state.voiceChat.isActive && state.voiceChat.activeTaskId === taskId) {
+        stopVoiceChat(taskId);
+        return;
+    }
+
+    // If voice chat is active for a different task, stop it first
+    if (state.voiceChat.isActive) {
+        stopVoiceChat(state.voiceChat.activeTaskId);
+    }
+
+    const taskSection = document.querySelector(`.task-section[data-id="${taskId}"]`);
+    if (!taskSection) return;
+
+    const voiceBtn = taskSection.querySelector('.voice-ai');
+    voiceBtn.classList.add('active');
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        state.voiceChat.mediaRecorder = new MediaRecorder(stream);
+        state.voiceChat.audioChunks = [];
+        state.voiceChat.isActive = true;
+        state.voiceChat.activeTaskId = taskId;
+
+        // Initialize conversation history if not exists
+        if (!state.voiceChat.conversation[taskId]) {
+            state.voiceChat.conversation[taskId] = [];
+        }
+
+        state.voiceChat.mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                state.voiceChat.audioChunks.push(event.data);
+            }
+        };
+
+        state.voiceChat.mediaRecorder.onstop = async () => {
+            if (state.voiceChat.audioChunks.length > 0) {
+                const audioBlob = new Blob(state.voiceChat.audioChunks, { type: 'audio/wav' });
+                state.voiceChat.audioChunks = [];
+                await processVoiceChatAudio(audioBlob, taskId);
+                
+                // Restart recording if still active
+                if (state.voiceChat.isActive && state.voiceChat.activeTaskId === taskId) {
+                    state.voiceChat.mediaRecorder.start();
+                }
+            }
+        };
+
+        // Start recording
+        state.voiceChat.mediaRecorder.start();
+        
+        // Show recording started notification
+        showNotification('Voice chat started - listening...', 'success');
+        
+        // Stop and restart recording every 5 seconds
+        state.voiceChat.recordingInterval = setInterval(() => {
+            if (state.voiceChat.isActive && 
+                state.voiceChat.activeTaskId === taskId && 
+                state.voiceChat.mediaRecorder.state === 'recording') {
+                state.voiceChat.mediaRecorder.stop();
+            }
+        }, 5000);
+
+    } catch (error) {
+        console.error('Error accessing microphone:', error);
+        showNotification('Could not access microphone', 'error');
+        stopVoiceChat(taskId);
+    }
+}
+
+async function stopVoiceChat(taskId) {
+    if (!taskId) return;
+
+    const taskSection = document.querySelector(`.task-section[data-id="${taskId}"]`);
+    if (!taskSection) return;
+
+    const voiceBtn = taskSection.querySelector('.voice-ai');
+    voiceBtn.classList.remove('active');
+    
+    // Clear the recording interval
+    if (state.voiceChat.recordingInterval) {
+        clearInterval(state.voiceChat.recordingInterval);
+        state.voiceChat.recordingInterval = null;
+    }
+    
+    // Stop the media recorder if it exists
+    if (state.voiceChat.mediaRecorder) {
+        if (state.voiceChat.mediaRecorder.state === 'recording') {
+            state.voiceChat.mediaRecorder.stop();
+        }
+        state.voiceChat.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    state.voiceChat.isActive = false;
+    state.voiceChat.activeTaskId = null;
+    state.voiceChat.mediaRecorder = null;
+    state.voiceChat.audioChunks = [];
+    
+    // Show stopped notification
+    showNotification('Voice chat stopped', 'info');
+}
+
+async function processVoiceChatAudio(audioBlob, taskId) {
+    try {
+        showLoading('Processing voice chat...', 10);
+        
+        // Create form data with audio
+        const formData = new FormData();
+        formData.append('audio', audioBlob);
+        formData.append('taskId', taskId);
+        formData.append('conversation', JSON.stringify(state.voiceChat.conversation[taskId] || []));
+
+        updateLoadingPercentage(30);
+
+        // Send to backend for processing
+        const response = await fetch('/api/voice-chat', {
+            method: 'POST',
+            body: formData
+        });
+
+        updateLoadingPercentage(60);
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to process voice chat');
+        }
+        
+        const data = await response.json();
+        
+        updateLoadingPercentage(80);
+        
+        // Add to conversation history
+        if (!state.voiceChat.conversation[taskId]) {
+            state.voiceChat.conversation[taskId] = [];
+        }
+        
+        state.voiceChat.conversation[taskId].push({
+            role: 'user',
+            content: data.transcription
+        });
+        
+        if (data.response) {
+            state.voiceChat.conversation[taskId].push({
+                role: 'assistant',
+                content: data.response
+            });
+        }
+
+        // Update tasks based on AI response
+        if (data.updatedTask) {
+            // Update high-level task
+            const taskIndex = state.bigGoals.findIndex(g => g.id === parseInt(taskId));
+            if (taskIndex !== -1) {
+                state.bigGoals[taskIndex] = {
+                    ...state.bigGoals[taskIndex],
+                    ...data.updatedTask
+                };
+            }
+            
+            // Update sub-tasks if provided
+            if (data.updatedSubTasks) {
+                state.smallGoals[taskId] = data.updatedSubTasks;
+            }
+            
+            // Re-render tasks to show updates
+            renderTasks();
+            addTaskEventListeners();
+            
+            // Save state
+            saveTasksState();
+            
+            // Show success notification
+            showNotification('Task updated successfully', 'success');
+        }
+
+        updateLoadingPercentage(100);
+        hideLoading();
+
+    } catch (error) {
+        console.error('Error processing voice chat:', error);
+        hideLoading();
+        showNotification(error.message || 'Error processing voice chat', 'error');
+        
+        // Stop voice chat on error
+        stopVoiceChat(taskId);
+    }
+}
+
+let currentRepository = null;
+
+async function loadRepositories() {
+    try {
+        elements.loadReposBtn.disabled = true;
+        elements.loadReposBtn.innerHTML = '<i class="material-icons">hourglass_empty</i> Loading...';
+        
+        const response = await fetch('/api/repositories');
+        if (!response.ok) throw new Error('Failed to fetch repositories');
+        
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Failed to load repositories');
+        
+        displayRepositories(data.repositories);
+    } catch (error) {
+        showNotification(error.message, 'error');
+    } finally {
+        elements.loadReposBtn.disabled = false;
+        elements.loadReposBtn.innerHTML = '<i class="material-icons">refresh</i> Load Repositories';
+    }
+}
+
+function displayRepositories(repositories) {
+    elements.reposList.innerHTML = repositories.map(repo => `
+        <div class="repository-item" data-repo-name="${repo.name}">
+            <div class="repository-info">
+                <div class="repository-name">${repo.name}</div>
+                <div class="repository-description">${repo.description || 'No description'}</div>
+            </div>
+            <button class="btn primary">Select</button>
+        </div>
+    `).join('');
+
+    elements.reposList.querySelectorAll('.repository-item').forEach(item => {
+        item.addEventListener('click', () => selectRepository(item.dataset.repoName));
+    });
+}
+
+// Add this new function to combine tasks into a single structure
+function getUnifiedTasksJson() {
+    return {
+        tasks: state.bigGoals.map(bigGoal => ({
+            id: bigGoal.id,
+            title: bigGoal.title,
+            description: bigGoal.description,
+            is_parent: true,
+            sub_tasks: state.smallGoals[bigGoal.id] || []
+        }))
+    };
+}
+
+async function selectRepository(repoName) {
+    try {
+        currentRepository = repoName;
+        elements.repoSelector.classList.add('hidden');
+        
+        showLoading('Loading repository data...', 10);
+        
+        const tasksResponse = await fetch(`/api/repository/${repoName}/tasks`);
+        if (!tasksResponse.ok) {
+            throw new Error('Failed to fetch repository tasks');
+        }
+        
+        const data = await tasksResponse.json();
+        console.log('Repository tasks data:', data);
+        
+        // Show steps container and hide tasks container
+        document.getElementById('steps-container').classList.remove('hidden');
+        document.getElementById('tasks-container').classList.add('hidden');
+        document.getElementById('small-goals-container').classList.remove('hidden');
+        
+        if (!data || !data.tasks || !Array.isArray(data.tasks)) {
+            throw new Error('Invalid response format');
+        }
+
+        // Update taskState with the repository tasks
+        taskState.updateTasks(data.tasks);
+        
+        // Show the tasks step (step 3)
+        const tasksStep = document.getElementById('step-3');
+        if (tasksStep) {
+            tasksStep.classList.add('active');
+            tasksStep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
+        // Update step indicators
+        elements.steps.forEach(step => {
+            step.classList.remove('active');
+            if (parseInt(step.dataset.step) === 3) {
+                step.classList.add('active');
+            }
+        });
+        
+        hideLoading();
+        showNotification('Repository loaded successfully', 'success');
+    } catch (error) {
+        console.error('Error in selectRepository:', error);
+        hideLoading();
+        showNotification(error.message, 'error');
+    }
+}
+
+async function loadRepositoryIssues() {
+    if (!currentRepository) return;
+
+    try {
+        elements.issuesContainer.innerHTML = '<div class="loading">Loading issues...</div>';
+        
+        const response = await fetch(`/api/repository/${currentRepository}/issues`);
+        if (!response.ok) throw new Error('Failed to fetch issues');
+        
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Failed to load issues');
+        
+        displayIssues(data.issues);
+    } catch (error) {
+        showNotification('Failed to load issues: ' + error.message, 'error');
+        showNotification('Failed to update issue: ' + error.message, 'error');
+    }
+}
+
+async function toggleIssueState(issueNumber) {
+    const issueItem = elements.issuesContainer.querySelector(`[data-issue-number="${issueNumber}"]`);
+    const currentState = issueItem.querySelector('.issue-state').textContent;
+    const newState = currentState === 'open' ? 'closed' : 'open';
+
+    try {
+        const response = await fetch(`/api/repository/${currentRepository}/issues/${issueNumber}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: newState })
+        });
+
+        if (!response.ok) throw new Error('Failed to update issue state');
+        
+        const updatedIssue = await response.json();
+        showNotification(`Issue ${newState}`, 'success');
+        await loadRepositoryIssues();
+    } catch (error) {
+        showNotification('Failed to update issue state: ' + error.message, 'error');
+    }
+}
+
+// Add event listeners
+elements.loadReposBtn.addEventListener('click', loadRepositories);
+elements.repoSearch.addEventListener('input', (e) => {
+    const searchTerm = e.target.value.toLowerCase();
+    elements.reposList.querySelectorAll('.repository-item').forEach(item => {
+        const repoName = item.querySelector('.repository-name').textContent.toLowerCase();
+        const repoDesc = item.querySelector('.repository-description').textContent.toLowerCase();
+        item.style.display = repoName.includes(searchTerm) || repoDesc.includes(searchTerm) ? '' : 'none';
+    });
+});
+
+elements.newProjectMode.addEventListener('click', () => {
+    elements.newProjectMode.classList.add('active');
+    elements.existingProjectMode.classList.remove('active');
+    elements.repoSelector.classList.add('hidden');
+    showStep(1);
+});
+
+elements.existingProjectMode.addEventListener('click', () => {
+    elements.existingProjectMode.classList.add('active');
+    elements.newProjectMode.classList.remove('active');
+    elements.repoSelector.classList.remove('hidden');
+    hideAllSteps();
+    loadRepositories();
+});
+
+// After the showStep function
+function hideAllSteps() {
+    elements.stepContents.forEach(step => {
+        step.classList.remove('active');
+    });
+    
+    // Also reset step indicators
+    elements.steps.forEach(step => {
+        step.classList.remove('active');
+    });
+}
+
+// Add event listeners for repository management
+elements.backToIssuesBtn.addEventListener('click', () => {
+    elements.repoSelector.classList.remove('hidden');
+    hideAllSteps();
+});
+
+elements.refreshIssuesBtn.addEventListener('click', loadRepositoryIssues);
+
+elements.createNewIssueBtn.addEventListener('click', async () => {
+    const title = prompt('Enter issue title:');
+    if (!title) return;
+
+    const body = prompt('Enter issue description:');
+    if (body === null) return;
+
+    try {
+        const response = await fetch(`/api/repository/${currentRepository}/issues`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, body })
+        });
+
+        if (!response.ok) throw new Error('Failed to create issue');
+        
+        showNotification('Issue created successfully', 'success');
+        await loadRepositoryIssues();
+    } catch (error) {
+        showNotification('Failed to create issue: ' + error.message, 'error');
+    }
+});
+
+function showStep(stepNumber) {
+    // Hide all steps first
+    elements.stepContents.forEach(step => {
+        step.classList.remove('active');
+    });
+    
+    // Show the requested step
+    const stepContent = document.getElementById(`step-${stepNumber}`);
+    if (stepContent) {
+        stepContent.classList.add('active');
+        
+        // Update step indicators
+        elements.steps.forEach(step => {
+            step.classList.remove('active');
+            if (parseInt(step.dataset.step) === stepNumber) {
+                step.classList.add('active');
+            }
+        });
+        
+        // Update state
+        state.activeStep = stepNumber;
+        
+        // Scroll to the active step
+        scrollToActiveStep();
+    }
+}
+
+function displayIssues(issues) {
+    elements.issuesContainer.innerHTML = issues.map(issue => `
+        <div class="issue-item" data-issue-number="${issue.number}">
+            <div class="issue-header">
+                <h3 class="issue-title">${issue.title}</h3>
+                <span class="issue-state ${issue.state}">${issue.state}</span>
+            </div>
+            <div class="issue-description">${issue.body || 'No description'}</div>
+            <div class="issue-actions">
+                <button class="btn-icon" onclick="toggleIssueState(${issue.number})">
+                    <i class="material-icons">${issue.state === 'open' ? 'check_circle' : 'radio_button_unchecked'}</i>
+                </button>
+                <button class="btn-icon" onclick="editIssue(${issue.number})">
+                    <i class="material-icons">edit</i>
+                </button>
+            </div>
+        </div>
+    `).join('') || '<div class="no-issues">No issues found</div>';
+}
+
+async function editIssue(issueNumber) {
+    const issueItem = elements.issuesContainer.querySelector(`[data-issue-number="${issueNumber}"]`);
+    const currentTitle = issueItem.querySelector('.issue-title').textContent;
+    const currentDescription = issueItem.querySelector('.issue-description').textContent;
+
+    const newTitle = prompt('Edit issue title:', currentTitle);
+    if (newTitle === null) return; // User cancelled
+
+    const newDescription = prompt('Edit issue description:', currentDescription);
+    if (newDescription === null) return; // User cancelled
+
+    try {
+        showLoading('Updating issue...', 10);
+        
+        const response = await fetch(`/api/repository/${currentRepository}/issues/${issueNumber}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: newTitle,
+                body: newDescription
+            })
+        });
+
+        if (!response.ok) throw new Error('Failed to update issue');
+        
+        hideLoading();
+        showNotification('Issue updated successfully', 'success');
+        await loadRepositoryIssues(); // Refresh the issues list
+    } catch (error) {
+        hideLoading();
+        showNotification('Failed to update issue: ' + error.message, 'error');
+    }
+}
+
+// Add unified state management for tasks
+const taskState = {
+    tasksJson: '', // Store tasks as JSON string
+
+    // Update tasks from any source (voice input or GitHub)
+    updateTasks: function(tasksData) {
+        console.log('Updating tasks with:', tasksData);
+        
+        let processedTasks = [];
+
+        // Handle direct array format (from modify-tasks-voice endpoint)
+        if (Array.isArray(tasksData)) {
+            console.log('Processing direct array format');
+            processedTasks = tasksData.map(task => {
+                // Ensure task has the expected structure
+                return {
+                    id: task.id || 0,
+                    title: task.title || "Untitled task",
+                    description: task.description || "",
+                    is_parent: task.is_parent !== undefined ? task.is_parent : true,
+                    sub_tasks: Array.isArray(task.sub_tasks) ? task.sub_tasks.map(subTask => ({
+                        id: subTask.id || 0,
+                        title: subTask.title || "Untitled subtask",
+                        description: subTask.description || ""
+                    })) : []
+                };
+            });
+        }
+        // Handle /analyze API format
+        else if (tasksData.big_goals && tasksData.big_goals.goals) {
+            console.log('Processing /analyze API format');
+            processedTasks = tasksData.big_goals.goals.map(task => ({
+                id: task.id,
+                title: task.title,
+                description: task.description || '',
+                is_parent: true,
+                sub_tasks: (task.sub_tasks || []).map(subTask => ({
+                    id: subTask.id,
+                    title: subTask.title,
+                    description: subTask.description || ''
+                }))
+            }));
+        }
+        // Handle /tasks API format
+        else if (Array.isArray(tasksData.tasks)) {
+            console.log('Processing /tasks API format');
+            // First, separate parent and child tasks
+            const parentTasks = tasksData.tasks.filter(task => task.is_parent && task.parent_id === null);
+            const childTasks = tasksData.tasks.filter(task => !task.is_parent && task.parent_id !== null);
+            
+            console.log('Parent tasks:', parentTasks);
+            console.log('Child tasks:', childTasks);
+
+            // Create the hierarchical structure
+            processedTasks = parentTasks.map(parentTask => ({
+                id: parentTask.number,
+                title: parentTask.title,
+                description: parentTask.body || '',
+                is_parent: true,
+                sub_tasks: childTasks
+                    .filter(child => child.parent_id === parentTask.number)
+                    .map(child => ({
+                        id: child.number,
+                        title: child.title,
+                        description: child.body || ''
+                    }))
+            }));
+        }
+        // Handle direct goals array
+        else if (Array.isArray(tasksData.goals)) {
+            console.log('Processing direct goals array');
+            processedTasks = tasksData.goals;
+        }
+
+        // Sort tasks by ID (ascending order)
+        processedTasks.sort((a, b) => a.id - b.id);
+        
+        // Store as JSON string
+        this.tasksJson = JSON.stringify(processedTasks);
+        console.log('Updated taskState JSON:', this.tasksJson);
+        
+        // Save to localStorage for persistence
+        localStorage.setItem('taskState', this.tasksJson);
+        
+        this.renderTasks();
+    },
+
+    // Get tasks as parsed object
+    getTasks: function() {
+        try {
+            return this.tasksJson ? JSON.parse(this.tasksJson) : [];
+        } catch (error) {
+            console.error('Error parsing tasks JSON:', error);
+            return [];
+        }
+    },
+
+    // Render tasks to UI
+    renderTasks: function() {
+        const tasks = this.getTasks();
+        const smallGoalsContainer = document.getElementById('small-goals-container');
+        if (!smallGoalsContainer) {
+            console.error('Could not find small-goals-container');
+            return;
+        }
+
+        // Clear existing content
+        smallGoalsContainer.innerHTML = '';
+
+        // If there are no tasks, show a message
+        if (!tasks || tasks.length === 0) {
+            smallGoalsContainer.innerHTML = '<p class="no-goals-message">No tasks available.</p>';
+            return;
+        }
+
+        // Add a single modify using voice button at the top
+        const topControlsContainer = document.createElement('div');
+        topControlsContainer.className = 'top-task-controls';
+        topControlsContainer.innerHTML = `
+            <button class="btn modify-tasks-voice" title="Modify tasks using voice">
+                <i class="material-icons">mic</i> Modify with Voice
+            </button>
+        `;
+        smallGoalsContainer.appendChild(topControlsContainer);
+
+        // Create sections for each task and its sub-tasks
+        tasks.forEach((task) => {
+            console.log(`Rendering task:`, task);
+            
+            const section = document.createElement('div');
+            section.className = 'big-goal-section';
+            section.dataset.id = task.id;
+            
+            // Add the main task as a card
+            const taskCard = document.createElement('div');
+            taskCard.className = 'big-goal-card';
+            taskCard.innerHTML = `
+                <div class="goal-header">
+                    <h3>${task.title}</h3>
+                    <div class="goal-meta">
+                        <span class="goal-type">High-Level Task</span>
+                        <span class="goal-id">#${task.id}</span>
+                    </div>
+                </div>
+                ${task.description ? `<div class="goal-description">${task.description}</div>` : ''}
+            `;
+            section.appendChild(taskCard);
+            
+            // Create container for sub-tasks
+            const subTasksWrapper = document.createElement('div');
+            subTasksWrapper.className = 'small-goals-wrapper';
+            
+            // Add sub-tasks if they exist
+            if (task.sub_tasks && task.sub_tasks.length > 0) {
+                task.sub_tasks.forEach(subTask => {
+                    const subTaskCard = document.createElement('div');
+                    subTaskCard.className = 'small-goal-card';
+                    subTaskCard.dataset.id = subTask.id;
+                    
+                    subTaskCard.innerHTML = `
+                        <div class="goal-header">
+                            <h4>${subTask.title}</h4>
+                            <div class="goal-meta">
+                                <span class="goal-type">Sub-Task</span>
+                                <span class="goal-id">#${subTask.id}</span>
+                            </div>
+                        </div>
+                        ${subTask.description ? `<div class="goal-description">${subTask.description}</div>` : ''}
+                    `;
+                    
+                    subTasksWrapper.appendChild(subTaskCard);
+                });
+            } else {
+                const noTasksMsg = document.createElement('p');
+                noTasksMsg.className = 'no-tasks-message';
+                noTasksMsg.textContent = 'No sub-tasks available.';
+                subTasksWrapper.appendChild(noTasksMsg);
+            }
+            
+            section.appendChild(subTasksWrapper);
+            smallGoalsContainer.appendChild(section);
+        });
+
+        // Show the small-goals-container and hide the tasks-container
+        const tasksContainer = document.getElementById('tasks-container');
+        if (tasksContainer) {
+            tasksContainer.classList.add('hidden');
+        }
+        smallGoalsContainer.classList.remove('hidden');
+        
+        // Add event listeners to the newly created buttons
+        addTaskEventListeners();
+    },
+
+    // Initialize state from localStorage if available
+    init: function() {
+        const savedState = localStorage.getItem('taskState');
+        if (savedState) {
+            this.tasksJson = savedState;
+            this.renderTasks();
+        }
+    }
+};
+
+// Initialize taskState when the page loads
+document.addEventListener('DOMContentLoaded', () => {
+    taskState.init();
+});
+
+// Add at the top of the file, after the elements declaration
+const router = {
+    currentPath: window.location.pathname,
+    routes: {
+        '/new-proj': {
+            step: 1,
+            onEnter: () => {
+                resetApplication();
+                updateActiveStep(1);
+            }
+        },
+        '/instructions': {
+            step: 2,
+            onEnter: () => updateActiveStep(2)
+        },
+        '/tasks': {
+            step: 3,
+            onEnter: () => updateActiveStep(3)
+        },
+        '/new-repo': {
+            step: 4,
+            onEnter: () => updateActiveStep(4)
+        },
+        '/create-issues': {
+            step: 5,
+            onEnter: () => updateActiveStep(5)
+        },
+        '/results': {
+            step: 6,
+            onEnter: () => updateActiveStep(6)
+        }
+    },
+    
+    navigate(path) {
+        // Update URL without page reload
+        window.history.pushState({}, '', path);
+        this.currentPath = path;
+        
+        // Find and execute the route handler
+        const route = this.routes[path];
+        if (route) {
+            route.onEnter();
+            highlightActiveStepIndicator();
+        }
+    },
+    
+    init() {
+        // Handle browser back/forward buttons
+        window.addEventListener('popstate', () => {
+            this.currentPath = window.location.pathname;
+            const route = this.routes[this.currentPath];
+            if (route) {
+                route.onEnter();
+                highlightActiveStepIndicator();
+            }
+        });
+        
+        // Set initial route
+        const initialPath = window.location.pathname;
+        if (this.routes[initialPath]) {
+            this.routes[initialPath].onEnter();
+        } else {
+            // Default to new project if no valid route
+            this.navigate('/new-proj');
+        }
+    }
+};
+
+// Add functions for task modification with voice
+async function startTaskModificationRecording() {
+    // If already recording, stop it
+    if (state.taskModification.isActive) {
+        stopTaskModificationRecording();
+        return;
+    }
+    
+    // Mark as active and update UI
+    state.taskModification.isActive = true;
+    const modifyBtn = document.querySelector('.modify-tasks-voice');
+    if (modifyBtn) {
+        modifyBtn.classList.add('recording');
+        modifyBtn.innerHTML = '<i class="material-icons">mic</i> Listening... (Click to Stop)';
+    }
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        state.taskModification.mediaRecorder = new MediaRecorder(stream);
+        state.taskModification.audioChunks = [];
+        
+        state.taskModification.mediaRecorder.addEventListener('dataavailable', event => {
+            if (event.data.size > 0) {
+                state.taskModification.audioChunks.push(event.data);
+            }
+        });
+        
+        state.taskModification.mediaRecorder.addEventListener('stop', () => {
+            if (state.taskModification.audioChunks.length > 0) {
+                const audioBlob = new Blob(state.taskModification.audioChunks, { type: 'audio/wav' });
+                processTaskModificationAudio(audioBlob);
+            }
+        });
+        
+        // Start recording
+        state.taskModification.mediaRecorder.start();
+        showNotification('Voice modification started - Speak to modify tasks...', 'info');
+        
+    } catch (error) {
+        console.error('Error accessing microphone:', error);
+        showNotification('Could not access microphone', 'error');
+        stopTaskModificationRecording();
+    }
+}
+
+function stopTaskModificationRecording() {
+    // Reset UI
+    const modifyBtn = document.querySelector('.modify-tasks-voice');
+    if (modifyBtn) {
+        modifyBtn.classList.remove('recording');
+        modifyBtn.innerHTML = '<i class="material-icons">mic</i> Modify with Voice';
+    }
+    
+    // Stop the media recorder if it exists
+    if (state.taskModification.mediaRecorder && state.taskModification.mediaRecorder.state === 'recording') {
+        state.taskModification.mediaRecorder.stop();
+        state.taskModification.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    state.taskModification.isActive = false;
+    showNotification('Voice modification stopped', 'info');
+}
+
+async function processTaskModificationAudio(audioBlob) {
+    try {
+        showLoading('Processing your voice modifications for all tasks...', 10);
+        
+        // Create form data with audio and current tasks
+        const formData = new FormData();
+        formData.append('audio', audioBlob);
+        formData.append('currentTasks', taskState.tasksJson);
+        
+        updateLoadingPercentage(30);
+        
+        // Send to backend for processing
+        const response = await fetch('/api/modify-tasks-voice', {
+            method: 'POST',
+            body: formData
+        });
+        
+        updateLoadingPercentage(60);
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to process audio');
+        }
+        
+        const data = await response.json();
+        updateLoadingPercentage(80);
+        
+        // Show transcription in notification
+        if (data.transcription) {
+            showNotification(`Transcription: "${data.transcription}"`, 'info', 5000);
+        }
+        
+        // Check if transcription was an error message or indicates no changes needed
+        const isErrorTranscription = data.transcription && 
+            (data.transcription.startsWith("I couldn't hear") || 
+             data.transcription.startsWith("There was an") ||
+             data.transcription.startsWith("Failed to process") ||
+             data.transcription.startsWith("Speech recognition failed"));
+        
+        const noChangesNeeded = data.transcription && 
+            (data.transcription.startsWith("No changes are needed") ||
+             data.transcription.toLowerCase().includes("no changes needed") ||
+             data.transcription.toLowerCase().includes("no changes are required") ||
+             data.transcription.toLowerCase().includes("no modifications needed"));
+        
+        // Check if the tasks have actually changed by comparing with the original JSON
+        let tasksHaveChanged = false;
+        if (data.updatedTasks) {
+            try {
+                const currentTasks = JSON.parse(taskState.tasksJson);
+                const updatedTasksStr = JSON.stringify(data.updatedTasks);
+                const currentTasksStr = JSON.stringify(currentTasks);
+                tasksHaveChanged = updatedTasksStr !== currentTasksStr;
+            } catch (e) {
+                console.error("Error comparing tasks:", e);
+                tasksHaveChanged = true; // Assume changes if comparison fails
+            }
+        }
+        
+        // Update tasks with the response
+        if (data.updatedTasks && tasksHaveChanged && !isErrorTranscription) {
+            taskState.updateTasks(data.updatedTasks);
+            showNotification('All tasks updated successfully!', 'success');
+        } else if (isErrorTranscription) {
+            showNotification(data.transcription, 'warning');
+        } else if (noChangesNeeded || !tasksHaveChanged) {
+            showNotification('No changes were needed to the tasks', 'info');
+        } else {
+            showNotification('Tasks processed successfully', 'success');
+        }
+        
+        updateLoadingPercentage(100);
+        hideLoading();
+        
+        // Start recording again to allow continuous voice modification
+        if (state.taskModification.isActive) {
+            // Clear previous audio chunks
+            state.taskModification.audioChunks = [];
+            
+            // Start a new recording session
+            if (state.taskModification.mediaRecorder) {
+                state.taskModification.mediaRecorder.start();
+                showNotification('Listening for more modifications...', 'info');
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error processing task modification audio:', error);
+        hideLoading();
+        showNotification(error.message || 'Error processing audio', 'error');
+        
+        // Even on error, restart recording to allow the user to try again
+        if (state.taskModification.isActive) {
+            // Clear previous audio chunks
+            state.taskModification.audioChunks = [];
+            
+            // Start a new recording session
+            if (state.taskModification.mediaRecorder) {
+                state.taskModification.mediaRecorder.start();
+                showNotification('Listening for more modifications...', 'info');
+            }
+        }
+    }
+}

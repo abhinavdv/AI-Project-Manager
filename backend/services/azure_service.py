@@ -9,8 +9,21 @@ from prompts import (
     SYSTEM_PROMPT,
     GENERATE_GOALS_PROMPT,
     BREAK_DOWN_GOAL_PROMPT,
-    GENERATE_REPO_INFO_PROMPT
+    GENERATE_REPO_INFO_PROMPT,
+    MODIFY_TASKS_VOICE_PROMPT
 )
+import tempfile
+import base64
+from pydub import AudioSegment
+from azure.cognitiveservices.speech import (
+    SpeechConfig, 
+    AudioConfig, 
+    SpeechRecognizer, 
+    ResultReason, 
+    CancellationDetails, 
+    CancellationReason
+)
+from openai import AzureOpenAI
 
 class AzureService:
     def __init__(self):
@@ -27,6 +40,21 @@ class AzureService:
         self.openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         self.openai_deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")
         self.openai_api_version = os.getenv("OPENAI_API_VERSION", "2024-02-15-preview")
+        
+        # Initialize Azure Speech config
+        self.speech_key = os.getenv("AZURE_SPEECH_KEY")
+        self.speech_region = os.getenv("AZURE_SPEECH_REGION", "eastus")
+        self.speech_config = SpeechConfig(
+            subscription=self.speech_key,
+            region=self.speech_region
+        )
+        
+        # Initialize Azure OpenAI config
+        self.openai_client = AzureOpenAI(
+            api_key=self.openai_key,
+            api_version="2024-02-15-preview",
+            azure_endpoint=self.openai_endpoint
+        )
     
     def _create_text_client(self, key, endpoint):
         """Create an Azure Text Analytics client."""
@@ -38,49 +66,68 @@ class AzureService:
             # Return None to allow the application to run with mock data
             return None
     
-    def _call_openai_api(self, prompt: str, max_tokens: int = 1000, temperature: float = 0.5, default_response=None) -> Dict[str, Any]:
+    def _call_openai_api(self, prompt: str = None, max_tokens: int = 4000, temperature: float = 0.5, default_response=None, system_prompt: str = None, user_prompt: str = None, deployment_name: str = None) -> Dict[str, Any]:
         """Call the OpenAI API using Azure endpoint."""
         try:
             if not self.openai_key or not self.openai_endpoint:
                 print("Azure OpenAI credentials not properly configured")
                 raise Exception("Azure OpenAI credentials not properly configured. Please set AZURE_OPENAI_KEY and AZURE_OPENAI_ENDPOINT environment variables.")
             
-            headers = {
-                "Content-Type": "application/json",
-                "api-key": self.openai_key
-            }
-            
-            payload = {
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "response_format": {"type": "json_object"}  # Request JSON response format
-            }
-            
-            url = f"{self.openai_endpoint}/openai/deployments/{self.openai_deployment}/chat/completions?api-version={self.openai_api_version}"
-            
-            # Print debugging info
-            print(f"Calling Azure OpenAI API at: {self.openai_endpoint}")
-            
-            response = requests.post(url, headers=headers, json=payload)
-            
-            if response.status_code == 200:
-                response_json = response.json()
-                content = response_json["choices"][0]["message"]["content"]
+            # Use the OpenAI client instead of direct API calls
+            try:
+                messages = []
+                
+                # Add system prompt
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                else:
+                    messages.append({"role": "system", "content": SYSTEM_PROMPT})
+                
+                # Add user prompt
+                if user_prompt:
+                    messages.append({"role": "user", "content": user_prompt})
+                elif prompt:
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    raise Exception("No prompt provided to OpenAI API call")
+                
+                # Use specified deployment name or default
+                model_name = deployment_name if deployment_name else self.openai_deployment
+                
+                response = self.openai_client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    response_format={"type": "json_object"}
+                )
+                
+                # Extract the content from the response
+                content = response.choices[0].message.content
                 
                 try:
-                    # Try to parse the JSON content directly
+                    # Try to parse the JSON content
                     content_json = json.loads(content)
                     return content_json
-                except json.JSONDecodeError:
-                    print(f"Error parsing JSON response: {content}")
-                    raise Exception(f"Failed to parse JSON from API response: {content}")
-            else:
-                print(f"Azure OpenAI API error: {response.status_code} - {response.text}")
-                raise Exception(f"Azure OpenAI API returned error status code: {response.status_code}, message: {response.text}")
+                except json.JSONDecodeError as e:
+                    print(f"JSON Parse Error: {str(e)}")
+                    print(f"Raw content: {content}")
+                    # Try to clean the content before parsing
+                    cleaned_content = content.strip()
+                    if cleaned_content.startswith('```json'):
+                        cleaned_content = cleaned_content[7:]
+                    if cleaned_content.endswith('```'):
+                        cleaned_content = cleaned_content[:-3]
+                    cleaned_content = cleaned_content.strip()
+                    try:
+                        return json.loads(cleaned_content)
+                    except:
+                        # If JSON parsing fails, return the raw content
+                        return {"content": content}
+                
+            except Exception as api_error:
+                print(f"API Call Error: {str(api_error)}")
+                raise Exception(f"Azure OpenAI API error: {str(api_error)}")
                 
         except Exception as e:
             print(f"Error calling Azure OpenAI API: {str(e)}")
@@ -168,55 +215,66 @@ class AzureService:
     
     def generate_goals(self, text: str) -> List[Dict[str, Any]]:
         """
-        Generate big goals based on project description.
+        Generate big goals and their sub-tasks based on project description.
         
         Args:
             text (str): Project description
             
         Returns:
-            list: List of goals
+            dict: Dictionary containing both big goals and their sub-tasks
         """
-        prompt = GENERATE_GOALS_PROMPT.format(text=text)
-        
-        response = self._call_openai_api(prompt)
-        
         try:
-            # Try to extract JSON if it's wrapped in other text
-            if isinstance(response, str) and not response.startswith('{'):
-                # Look for JSON-like patterns
-                import re
-                json_match = re.search(r'(\{.*\})', response, re.DOTALL)
-                if json_match:
-                    content = json_match.group(1)
-                    response = json.loads(content)
-                else:
-                    raise Exception("Cannot find JSON object in response")
+            prompt = GENERATE_GOALS_PROMPT.format(text=text)
+            response = self._call_openai_api(prompt)
             
-            # Ensure response is a dictionary
+            # Validate response structure
             if not isinstance(response, dict):
-                raise Exception(f"Expected dictionary response, got {type(response)}")
-                
-            # Extract goals array
-            if "goals" in response and isinstance(response["goals"], list):
-                # Ensure all goals have the required fields
-                valid_goals = []
-                for i, goal in enumerate(response["goals"]):
-                    if isinstance(goal, dict) and "title" in goal:
-                        # Ensure each goal has an id and description
-                        valid_goal = {
-                            "id": goal.get("id", i + 1),
-                            "title": goal["title"],
-                            "description": goal.get("description", "")
-                        }
-                        valid_goals.append(valid_goal)
-                
-                if valid_goals:
-                    return valid_goals
+                raise ValueError(f"Expected dictionary response, got {type(response)}")
             
-            raise Exception("Unexpected JSON structure in LLM response")
+            # Extract goals array
+            goals = response.get("goals", [])
+            if not isinstance(goals, list):
+                raise ValueError(f"Expected goals to be a list, got {type(goals)}")
+            
+            # Validate and process each goal
+            processed_goals = []
+            for goal in goals:
+                if not isinstance(goal, dict):
+                    print(f"Skipping invalid goal: {goal}")
+                    continue
+                
+                # Ensure required fields exist
+                if "title" not in goal:
+                    print(f"Skipping goal without title: {goal}")
+                    continue
+                
+                # Process sub-tasks if they exist
+                sub_tasks = []
+                if "sub_tasks" in goal and isinstance(goal["sub_tasks"], list):
+                    for task in goal["sub_tasks"]:
+                        if isinstance(task, dict) and "title" in task:
+                            sub_tasks.append({
+                                "id": task.get("id", len(sub_tasks) + 1),
+                                "title": task["title"],
+                                "description": task.get("description", "")
+                            })
+                
+                # Add processed goal
+                processed_goals.append({
+                    "id": goal.get("id", len(processed_goals) + 1),
+                    "title": goal["title"],
+                    "description": goal.get("description", ""),
+                    "sub_tasks": sub_tasks
+                })
+            
+            if not processed_goals:
+                raise ValueError("No valid goals found in response")
+            
+            return {"goals": processed_goals}
+        
         except Exception as e:
-            print(f"Error parsing LLM response: {str(e)}")
-            raise
+            print(f"Error generating goals: {str(e)}")
+            raise Exception(f"Failed to generate goals: {str(e)}")
     
     def _get_mock_goals(self):
         """Return mock goals if API fails"""
@@ -374,4 +432,187 @@ class AzureService:
             {"id": base_id + 1, "title": "Design implementation", "description": "Create detailed design and architecture for the implementation"},
             {"id": base_id + 2, "title": "Implementation", "description": "Implement the code and functionality according to design"},
             {"id": base_id + 3, "title": "Testing and validation", "description": "Test the implementation thoroughly and validate against requirements"}
-        ] 
+        ]
+
+    def transcribe_audio(self, audio_file):
+        """
+        Transcribe audio file to text using Azure Speech Services.
+        """
+        try:
+            # Save the file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio:
+                audio_file.save(temp_audio.name)
+                
+                try:
+                    # Convert to proper WAV format using pydub
+                    audio = AudioSegment.from_file(temp_audio.name)
+                    
+                    # Export as proper WAV file with correct parameters
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as proper_wav:
+                        audio.export(proper_wav.name, format='wav', 
+                                   parameters=[
+                                       "-acodec", "pcm_s16le",  # 16-bit PCM
+                                       "-ac", "1",              # mono
+                                       "-ar", "16000"           # 16kHz sample rate
+                                   ])
+                        
+                        # Configure audio input
+                        audio_config = AudioConfig(filename=proper_wav.name)
+                        speech_recognizer = SpeechRecognizer(
+                            speech_config=self.speech_config,
+                            audio_config=audio_config
+                        )
+                        
+                        # Perform transcription
+                        result = speech_recognizer.recognize_once_async().get()
+                        
+                        # Clean up temporary files
+                        os.unlink(proper_wav.name)
+                        os.unlink(temp_audio.name)
+                        
+                        if result.reason == ResultReason.RecognizedSpeech:
+                            return result.text
+                        elif result.reason == ResultReason.NoMatch:
+                            print("No speech could be recognized. Please speak more clearly or check your microphone.")
+                            return "I couldn't hear what you said. Please try again by speaking clearly."
+                        elif result.reason == ResultReason.Canceled:
+                            cancellation = CancellationDetails.from_result(result)
+                            
+                            if cancellation.reason == CancellationReason.Error:
+                                print(f"Speech recognition canceled due to error: {cancellation.error_details}")
+                                if "401" in cancellation.error_details:
+                                    return "Speech recognition failed: Authentication error. Please check your Azure credentials."
+                                elif "network" in cancellation.error_details.lower():
+                                    return "Speech recognition failed: Network error. Please check your internet connection."
+                                else:
+                                    return f"Speech recognition failed: {cancellation.error_details}"
+                            else:
+                                print(f"Speech recognition canceled: {cancellation.reason}")
+                                return "Speech recognition was canceled. Please try again."
+                        else:
+                            print(f"Speech recognition result: {result.reason}")
+                            return "There was an issue understanding your speech."
+                        
+                except Exception as e:
+                    # Clean up temporary files in case of error
+                    if os.path.exists(temp_audio.name):
+                        os.unlink(temp_audio.name)
+                    print(f"Error in speech recognition: {str(e)}")
+                    return "There was an error processing your speech. Please try again."
+                
+        except Exception as e:
+            print(f"Error transcribing audio: {str(e)}")
+            return "Failed to process audio. Please try again."
+
+    def process_voice_chat(self, transcription, task_id, conversation):
+        """
+        Process voice chat input and return updated task information using Azure OpenAI.
+        
+        Args:
+            transcription (str): The transcribed text from audio
+            task_id (str): The ID of the task being modified
+            conversation (list): List of previous conversation messages
+            
+        Returns:
+            dict: Response containing message and updated task information
+        """
+        try:
+            # Prepare the prompt for the OpenAI API
+            system_prompt = "You are an AI assistant helping to update task information based on voice input. " \
+                          "You have access to a task and its sub-tasks. The user may ask to modify, add, or remove " \
+                          "tasks and sub-tasks. Your responses should be helpful, concise, and focused on the task."
+            
+            # Include the task ID and existing conversation
+            user_prompt = f"I'm currently looking at task #{task_id}. " \
+                         f"The user said: \"{transcription}\"\n\n" \
+                         f"Here is our conversation so far: {json.dumps(conversation)}"
+            
+            # Make the API call
+            response = self._call_openai_api(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                deployment_name=self.openai_deployment
+            )
+            
+            # Process the response
+            return {
+                "message": response.get("message", ""),
+                "updatedTask": response.get("updatedTask"),
+                "updatedSubTasks": response.get("updatedSubTasks")
+            }
+            
+        except Exception as e:
+            print(f"Error processing voice chat: {str(e)}")
+            raise Exception(f"Failed to process voice chat: {str(e)}")
+    
+    def modify_tasks_voice(self, transcription, current_tasks):
+        """
+        Modify tasks based on voice input using Azure OpenAI.
+        
+        Args:
+            transcription (str): The transcribed text from audio
+            current_tasks (list): The current tasks and subtasks
+            
+        Returns:
+            list: Updated tasks based on voice input
+        """
+        try:
+            # Check if transcription is an error message
+            if transcription.startswith(("I couldn't hear", "There was an", "Failed to process")):
+                print(f"Transcription error: {transcription}")
+                return current_tasks
+                
+            # Prepare the prompt for the OpenAI API
+            system_prompt = "You are an AI assistant helping to update tasks based on voice input. " \
+                           "You have access to the complete list of tasks and sub-tasks. Based on the user's voice input, " \
+                           "you should determine if any changes are needed to any tasks in the list. " \
+                           "Make changes only based on the voice input provided."
+            
+            # Format current tasks for the prompt
+            task_json = json.dumps(current_tasks, indent=2)
+            
+            user_prompt = f"""
+            Below is a set of tasks and sub-tasks for each task. 
+            The user wants to modify the task list using their voice input.
+            Figure out if any changes are needed to any tasks based on the voice input.
+            MAKE ONLY CHANGES BASED ON THE VOICE INPUT: "{transcription}"
+
+            Below is the current JSON:
+            {task_json}
+            
+            Return the modified tasks in the exact same JSON format. If no changes are needed, 
+            return the original tasks unchanged.
+            """
+            
+            # Make the API call
+            response = self._call_openai_api(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=4000,
+                deployment_name=self.openai_deployment
+            )
+            
+            # Process the response to extract the updated tasks JSON
+            message = response.get("content", "")
+            
+            try:
+                # Try to extract JSON from the message
+                import re
+                json_match = re.search(r'```json\s*([\s\S]*?)\s*```', message)
+                if json_match:
+                    json_str = json_match.group(1).strip()
+                    updated_tasks = json.loads(json_str)
+                else:
+                    # If no JSON code block, try to parse the entire message as JSON
+                    updated_tasks = json.loads(message)
+                
+                return updated_tasks
+            except Exception as json_error:
+                print(f"Error parsing updated tasks JSON: {str(json_error)}")
+                print(f"Original message: {message}")
+                # If parsing fails, return the original tasks
+                return current_tasks
+            
+        except Exception as e:
+            print(f"Error modifying tasks with voice: {str(e)}")
+            raise Exception(f"Failed to modify tasks with voice: {str(e)}") 
