@@ -20,6 +20,9 @@
     <meta name="mobile-web-app-capable" content="yes">
     <!-- Animation Library -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -211,9 +214,17 @@
                         <button id="back-to-prompt-btn" class="btn secondary">
                             <i class="material-icons">arrow_back</i> Back
                         </button>
+                        <button id="allocate-work-btn" class="btn secondary">
+                            <i class="material-icons">people</i> Allocate Work to Users
+                        </button>
                         <button id="proceed-to-repo-btn" class="btn primary">
                             Create Repository <i class="material-icons">arrow_forward</i>
                         </button>
+                    </div>
+                    
+                    <!-- Gantt Chart Container - will be shown after allocation -->
+                    <div id="gantt-chart-container" class="chart-container hidden">
+                        <!-- React will render the Gantt chart here -->
                     </div>
                 </section>
                 
@@ -362,6 +373,115 @@
         </div>
     </section>
     
+    <!-- Add modal for developer input -->
+    <div id="developer-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Developer Allocation</h3>
+                <button class="btn-icon close-modal">
+                    <i class="material-icons">close</i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Enter information about your development team to allocate tasks.</p>
+                
+                <div class="form-group">
+                    <label for="developer-count">Number of Developers:</label>
+                    <input type="number" id="developer-count" min="1" max="10" value="1">
+                </div>
+                
+                <div id="developer-inputs-container">
+                    <!-- Developer inputs will be generated here -->
+                    <div class="developer-input" data-id="1">
+                        <h4>Developer 1</h4>
+                        <div class="form-group">
+                            <label for="developer-name-1">Name:</label>
+                            <input type="text" id="developer-name-1" placeholder="Developer name">
+                        </div>
+                        <div class="form-group">
+                            <label for="developer-hours-1">Available Hours per Week:</label>
+                            <input type="number" id="developer-hours-1" min="1" max="80" value="40">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button id="cancel-allocation-btn" class="btn secondary">
+                        <i class="material-icons">cancel</i> Cancel
+                    </button>
+                    <button id="allocate-tasks-btn" class="btn primary">
+                        <i class="material-icons">assignment_turned_in</i> Allocate Tasks
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Work Allocation Section -->
+    <div id="work-allocation-step" class="step hidden">
+        <div class="step-content">
+            <h2>Work Allocation Plan</h2>
+            <p>Add developers to your team and allocate tasks based on skills and workload.</p>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3>Developer Team</h3>
+                    <button id="add-developer-btn" class="btn btn-primary btn-sm">Add Developer</button>
+                </div>
+                <div class="card-body">
+                    <div id="developer-list" class="developer-list">
+                        <!-- Developers will be listed here -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h3>Task Allocation</h3>
+                    <button id="allocate-tasks-btn" class="btn btn-primary btn-sm">Allocate Tasks</button>
+                </div>
+                <div class="card-body">
+                    <div id="task-allocation-results" class="task-allocation-results">
+                        <!-- Task allocation results will be displayed here -->
+                    </div>
+                </div>
+            </div>
+            
+            <div id="gantt-chart-container" class="chart-container hidden">
+                <div class="gantt-chart-header">
+                    <h3 class="gantt-chart-title">Work Allocation Plan</h3>
+                </div>
+                
+                <div class="gantt-chart-controls">
+                    <button class="filter-button active" data-filter="all">All Tasks</button>
+                    <button class="filter-button" data-filter="main">Main Tasks</button>
+                    <button class="filter-button" data-filter="subtask">Subtasks</button>
+                    <button class="filter-button" data-filter="next-2-weeks">Next 2 Weeks</button>
+                    <button class="filter-button" data-filter="next-month">Next Month</button>
+                </div>
+                
+                <div class="gantt-chart-wrapper">
+                    <div class="gantt-chart-inner">
+                        <canvas id="gantt-chart"></canvas>
+                    </div>
+                    <div class="scroll-indicator">
+                        <span>Scroll</span>
+                        <i class="material-icons">arrow_forward</i>
+                    </div>
+                </div>
+                
+                <div class="chart-legend" id="chart-legend">
+                    <!-- Developer legend will be added here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/moment.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chartjs-adapter-moment.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/gantt-react-bundle.js') }}"></script>
 </body>
 </html> 

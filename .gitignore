@@ -1,1 +1,13 @@
 .env
+node_modules/
+*/node_modules
+*/node_modules/*
+backend/static/js/gantt-react-bundle.js
+backend/static/js/gantt-react-bundle.js.LICENSE.txt
+
+# Python cache
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/

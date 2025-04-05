@@ -50,6 +50,12 @@ const state = {
         isActive: false,
         mediaRecorder: null,
         audioChunks: []
+    },
+    
+    // Work allocation state
+    workAllocation: {
+        developers: [],
+        taskAssignments: []
     }
 };
 
@@ -198,6 +204,17 @@ const elements = {
     refreshIssuesBtn: document.getElementById('refresh-issues-btn'),
     createNewIssueBtn: document.getElementById('create-new-issue-btn'),
     issuesContainer: document.getElementById('issues-container'),
+    
+    // Work allocation
+    allocateWorkBtn: document.getElementById('allocate-work-btn'),
+    developerModal: document.getElementById('developer-modal'),
+    closeModalBtn: document.querySelector('.close-modal'),
+    developerCount: document.getElementById('developer-count'),
+    developerInputsContainer: document.getElementById('developer-inputs-container'),
+    cancelAllocationBtn: document.getElementById('cancel-allocation-btn'),
+    allocateTasksBtn: document.getElementById('allocate-tasks-btn'),
+    ganttChartContainer: document.getElementById('gantt-chart-container'),
+    ganttChart: document.getElementById('gantt-chart'),
 };
 
 // Debug log to check initialization of key elements
@@ -452,6 +469,16 @@ function updateActiveStep(stepNumber) {
             activeSection.classList.add('active');
             activeSection.style.opacity = '1';
             activeSection.classList.add('highlight-transition');
+            
+            // Special handling for step 1 - make sure recording UI is visible
+            if (stepNumber === 1) {
+                elements.audioPreview.classList.add('hidden');
+                elements.startRecordingBtn.classList.remove('hidden');
+                elements.stopRecordingBtn.classList.add('hidden');
+                elements.recordingIndicator.classList.add('hidden');
+                elements.transcriptionContainer.classList.add('hidden');
+            }
+            
             setTimeout(() => {
                 activeSection.classList.remove('highlight-transition');
             }, 1000);
@@ -1208,6 +1235,18 @@ function resetApplication() {
         5: { name: '', description: '' }
     };
     
+    // Reset work allocation
+    state.workAllocation = {
+        developers: [],
+        taskAssignments: []
+    };
+    
+    // Hide gantt chart
+    if (elements.ganttChartContainer) {
+        elements.ganttChartContainer.classList.add('hidden');
+        elements.ganttChartContainer.classList.remove('show');
+    }
+    
     // Reset form inputs
     elements.promptInput.value = '';
     elements.repoNameInput.value = '';
@@ -1216,6 +1255,7 @@ function resetApplication() {
     // Clear local storage
     localStorage.removeItem('githubManagerState');
     localStorage.removeItem('sidebarCollapsed');
+    localStorage.removeItem('workAllocationData');
     
     // Reset UI
     renderBigGoals();
@@ -1223,11 +1263,19 @@ function resetApplication() {
     updateGraph();
     updateStepIndicators();
     
-    // Go back to first step
-    goToStep(1);
+    // Make sure New Project mode is active
+    elements.newProjectMode.classList.add('active');
+    elements.existingProjectMode.classList.remove('active');
+    elements.repoSelector.classList.add('hidden');
     
     // Show notification
     showNotification('Application has been reset', 'success');
+    
+    // Navigate to first step - use router.navigate directly to avoid circular reference
+    window.history.pushState({}, '', '/new-proj');
+    router.currentPath = '/new-proj';
+    updateActiveStep(1);
+    highlightActiveStepIndicator();
 }
 
 // Setup event listeners
@@ -1708,6 +1756,9 @@ function init() {
     setupSidebar();
     setupGraph();
     
+    // Initialize work allocation
+    setupWorkAllocation();
+    
     // Initialize router
     router.init();
     
@@ -1716,6 +1767,9 @@ function init() {
     
     // Load saved state from localStorage
     loadStateFromLocalStorage();
+    
+    // Load saved work allocation data
+    loadWorkAllocationData();
     
     // Debug repository form when it's shown
     router.routes['/new-repo'].onEnter = () => {
@@ -2914,24 +2968,39 @@ function showStep(stepNumber) {
         step.classList.remove('active');
     });
     
-    // Show the requested step
-    const stepContent = document.getElementById(`step-${stepNumber}`);
-    if (stepContent) {
-        stepContent.classList.add('active');
-        
-        // Update step indicators
-        elements.steps.forEach(step => {
-            step.classList.remove('active');
-            if (parseInt(step.dataset.step) === stepNumber) {
-                step.classList.add('active');
-            }
-        });
-        
-        // Update state
-        state.activeStep = stepNumber;
-        
-        // Scroll to the active step
-        scrollToActiveStep();
+    // Show the requested step - map step numbers to IDs
+    const stepIdMap = {
+        1: 'new-proj',
+        2: 'instructions',
+        3: 'tasks',
+        4: 'new-repo',
+        5: 'create-issues',
+        6: 'results'
+    };
+    
+    const stepId = stepIdMap[stepNumber];
+    if (stepId) {
+        const stepContent = document.getElementById(stepId);
+        if (stepContent) {
+            stepContent.classList.add('active');
+            
+            // Update step indicators
+            elements.steps.forEach(step => {
+                step.classList.remove('active');
+                if (step.dataset.path === `/${stepId}`) {
+                    step.classList.add('active');
+                }
+            });
+        }
+    }
+    
+    // Special handling for step 1 - make sure recording UI is visible
+    if (stepNumber === 1) {
+        elements.audioPreview.classList.add('hidden');
+        elements.startRecordingBtn.classList.remove('hidden');
+        elements.stopRecordingBtn.classList.add('hidden');
+        elements.recordingIndicator.classList.add('hidden');
+        elements.transcriptionContainer.classList.add('hidden');
     }
 }
 
@@ -3205,7 +3274,7 @@ const router = {
         '/new-proj': {
             step: 1,
             onEnter: () => {
-                resetApplication();
+                // Only update the active step without resetting the application
                 updateActiveStep(1);
             }
         },
@@ -3430,6 +3499,506 @@ async function processTaskModificationAudio(audioBlob) {
                 state.taskModification.mediaRecorder.start();
                 showNotification('Listening for more modifications...', 'info');
             }
+        }
+    }
+}
+
+// Work Allocation Functions
+function setupWorkAllocation() {
+    console.log('Setting up work allocation...');
+    
+    // Ensure all elements are initialized
+    elements.allocateWorkBtn = document.getElementById('allocate-work-btn');
+    elements.developerModal = document.getElementById('developer-modal');
+    
+    if (!elements.allocateWorkBtn) {
+        console.error('Allocate work button not found!');
+        return;
+    }
+    
+    console.log('Allocate work button found:', elements.allocateWorkBtn);
+    
+    // Show modal when allocate work button is clicked
+    elements.allocateWorkBtn.addEventListener('click', () => {
+        console.log('Allocate work button clicked');
+        
+        // Verify we have tasks to allocate
+        const tasks = taskState.getTasks();
+        console.log('Tasks for allocation:', tasks);
+        
+        if (!tasks || tasks.length === 0) {
+            showNotification('No tasks available to allocate', 'warning');
+            return;
+        }
+        
+        // Show the developer modal
+        showDeveloperModal();
+    });
+    
+    // Initialize modal elements if they exist
+    if (elements.developerModal) {
+        console.log('Developer modal found, initializing related elements');
+        
+        // Close modal buttons
+        elements.closeModalBtn = document.querySelector('#developer-modal .close-modal');
+        elements.cancelAllocationBtn = document.getElementById('cancel-allocation-btn');
+        
+        if (elements.closeModalBtn) {
+            elements.closeModalBtn.addEventListener('click', hideDeveloperModal);
+            console.log('Close modal button listener added');
+        } else {
+            console.error('Close modal button not found!');
+        }
+        
+        if (elements.cancelAllocationBtn) {
+            elements.cancelAllocationBtn.addEventListener('click', hideDeveloperModal);
+            console.log('Cancel allocation button listener added');
+        } else {
+            console.error('Cancel allocation button not found!');
+        }
+        
+        // Number of developers input change
+        elements.developerCount = document.getElementById('developer-count');
+        if (elements.developerCount) {
+            elements.developerCount.addEventListener('input', updateDeveloperInputs);
+            console.log('Developer count input listener added');
+        } else {
+            console.error('Developer count input not found!');
+        }
+        
+        // Allocate tasks button
+        elements.allocateTasksBtn = document.getElementById('allocate-tasks-btn');
+        if (elements.allocateTasksBtn) {
+            elements.allocateTasksBtn.addEventListener('click', allocateTasks);
+            console.log('Allocate tasks button listener added');
+        } else {
+            console.error('Allocate tasks button not found!');
+        }
+        
+        // Developer inputs container
+        elements.developerInputsContainer = document.getElementById('developer-inputs-container');
+        if (!elements.developerInputsContainer) {
+            console.error('Developer inputs container not found!');
+        }
+    } else {
+        console.error('Developer modal not found in the DOM!');
+    }
+}
+
+function showDeveloperModal() {
+    // Make sure the modal is initialized
+    if (!elements.developerModal) {
+        elements.developerModal = document.getElementById('developer-modal');
+        elements.closeModalBtn = document.querySelector('#developer-modal .close-modal');
+        elements.developerCount = document.getElementById('developer-count');
+        elements.developerInputsContainer = document.getElementById('developer-inputs-container');
+        elements.cancelAllocationBtn = document.getElementById('cancel-allocation-btn');
+        elements.allocateTasksBtn = document.getElementById('allocate-tasks-btn');
+    }
+    
+    if (!elements.developerModal) {
+        console.error('Developer modal not found in the DOM');
+        showNotification('Error showing developer modal', 'error');
+        return;
+    }
+    
+    // Make modal visible 
+    elements.developerModal.classList.remove('hidden');
+    elements.developerModal.style.display = 'flex';
+    setTimeout(() => {
+        elements.developerModal.classList.add('show');
+    }, 10);
+    
+    // Reset inputs
+    elements.developerCount.value = 1;
+    updateDeveloperInputs();
+}
+
+function hideDeveloperModal() {
+    if (elements.developerModal) {
+        elements.developerModal.classList.remove('show');
+        elements.developerModal.classList.add('hidden');
+        setTimeout(() => {
+            elements.developerModal.style.display = 'none';
+        }, 300); // Match transition duration
+    }
+}
+
+function updateDeveloperInputs() {
+    const count = parseInt(elements.developerCount.value) || 1;
+    elements.developerInputsContainer.innerHTML = '';
+    
+    for (let i = 1; i <= count; i++) {
+        const developerInput = document.createElement('div');
+        developerInput.className = 'developer-input';
+        developerInput.dataset.id = i;
+        
+        developerInput.innerHTML = `
+            <h4>Developer ${i}</h4>
+            <div class="form-group">
+                <label for="developer-name-${i}">Name:</label>
+                <input type="text" id="developer-name-${i}" placeholder="Developer name" value="Developer ${i}">
+            </div>
+            <div class="form-group">
+                <label for="developer-hours-${i}">Available Hours per Week:</label>
+                <input type="number" id="developer-hours-${i}" min="1" max="80" value="40">
+            </div>
+        `;
+        
+        elements.developerInputsContainer.appendChild(developerInput);
+    }
+}
+
+function collectDeveloperData() {
+    const developerInputs = elements.developerInputsContainer.querySelectorAll('.developer-input');
+    const developers = [];
+    
+    developerInputs.forEach(input => {
+        const id = parseInt(input.dataset.id);
+        const name = input.querySelector(`#developer-name-${id}`).value.trim() || `Developer ${id}`;
+        const hoursPerWeek = parseInt(input.querySelector(`#developer-hours-${id}`).value) || 40;
+        
+        developers.push({
+            id,
+            name,
+            hoursPerWeek,
+            availableHours: hoursPerWeek, // Initially available hours equals total hours
+            tasks: [] // Will hold assigned tasks
+        });
+    });
+    
+    return developers;
+}
+
+function estimateTaskDuration(task) {
+    // Check if we should call Azure AI for estimations
+    const useAzureAI = false; // Set to true if we want to use Azure AI
+    
+    if (useAzureAI) {
+        // This would be the implementation for Azure AI
+        // For now, we'll use a more sophisticated local estimation
+        return estimateTaskDurationLocally(task);
+    } else {
+        return estimateTaskDurationLocally(task);
+    }
+}
+
+function estimateTaskDurationLocally(task) {
+    // More sophisticated estimation logic
+    
+    // Base hours depend on whether it's a task with or without subtasks
+    let baseHours = 4; // Default base time for any task
+    
+    // Analyze description complexity
+    const description = task.description || '';
+    const title = task.title || '';
+    const combinedText = `${title} ${description}`;
+    
+    // Complexity factors
+    const lengthFactor = Math.log(combinedText.length + 1) / 4; // Logarithmic scaling for text length
+    
+    // Keyword-based complexity adjustment
+    const complexityKeywords = [
+        'complex', 'difficult', 'challenging', 'architecture', 'system', 
+        'integrate', 'authentication', 'security', 'database', 'optimization',
+        'algorithm', 'refactor', 'redesign', 'implement', 'create'
+    ];
+    
+    const simplicityKeywords = [
+        'simple', 'easy', 'basic', 'quick', 'small', 'minor', 'fix', 
+        'update', 'change', 'modify', 'adjust', 'tweak'
+    ];
+    
+    let keywordMultiplier = 1.0;
+    
+    // Check for complexity keywords
+    complexityKeywords.forEach(keyword => {
+        if (combinedText.toLowerCase().includes(keyword)) {
+            keywordMultiplier += 0.15; // 15% increase per complexity keyword
+        }
+    });
+    
+    // Check for simplicity keywords
+    simplicityKeywords.forEach(keyword => {
+        if (combinedText.toLowerCase().includes(keyword)) {
+            keywordMultiplier -= 0.1; // 10% decrease per simplicity keyword
+        }
+    });
+    
+    keywordMultiplier = Math.max(0.5, Math.min(2.5, keywordMultiplier)); // Limit range between 0.5x and 2.5x
+    
+    // Calculate base estimation
+    let estimatedHours = baseHours * (1 + lengthFactor) * keywordMultiplier;
+    
+    // If it's a subtask, we generally estimate it smaller
+    if (task.isSubtask) {
+        estimatedHours *= 0.6; // Subtasks take about 60% of the time of main tasks
+    }
+    
+    // If this task has subtasks, add their estimated time (if not already calculated)
+    if (task.sub_tasks && task.sub_tasks.length > 0) {
+        // Don't count subtasks if they're being independently allocated
+        // Just use this task as a container/parent with minimal time
+        estimatedHours = Math.max(estimatedHours, 2); // Minimum 2 hours for parent tasks
+    }
+    
+    // Round to nearest half hour and set reasonable limits
+    estimatedHours = Math.round(estimatedHours * 2) / 2;
+    return Math.min(40, Math.max(1, estimatedHours)); // Between 1 and 40 hours
+}
+
+function allocateTasks() {
+    // Get developers
+    const developers = collectDeveloperData();
+    
+    // Get tasks from taskState
+    const tasks = taskState.getTasks();
+    
+    if (!tasks || tasks.length === 0) {
+        showNotification('No tasks available to allocate', 'warning');
+        hideDeveloperModal();
+        return;
+    }
+    
+    // Prepare a flattened list of all tasks including subtasks
+    const allTasks = [];
+    
+    // Process main tasks and their subtasks
+    tasks.forEach(task => {
+        // Add main task
+        allTasks.push({
+            id: task.id,
+            title: task.title,
+            description: task.description || '',
+            estimatedHours: estimateTaskDuration(task),
+            isSubtask: false,
+            parentId: null
+        });
+        
+        // Add subtasks if they exist
+        if (task.sub_tasks && task.sub_tasks.length > 0) {
+            task.sub_tasks.forEach(subtask => {
+                allTasks.push({
+                    id: `${task.id}-${subtask.id}`, // Create unique ID for subtask
+                    title: subtask.title,
+                    description: subtask.description || '',
+                    estimatedHours: estimateTaskDuration(subtask) / 2, // Subtasks are typically smaller
+                    isSubtask: true,
+                    parentId: task.id,
+                    parentTitle: task.title
+                });
+            });
+        }
+    });
+    
+    // Sort tasks by estimated hours (descending) but keep subtasks after their parent tasks
+    allTasks.sort((a, b) => {
+        // If one is a subtask and the other is not, non-subtask comes first
+        if (a.isSubtask !== b.isSubtask) {
+            return a.isSubtask ? 1 : -1;
+        }
+        
+        // If both are subtasks, check if they have the same parent
+        if (a.isSubtask && b.isSubtask && a.parentId !== b.parentId) {
+            // Sort by parent ID to keep subtasks of the same parent together
+            return a.parentId - b.parentId;
+        }
+        
+        // Otherwise sort by estimated hours (descending)
+        return b.estimatedHours - a.estimatedHours;
+    });
+    
+    // Allocate tasks to developers
+    let currentDate = new Date();
+    currentDate.setHours(9, 0, 0, 0); // Start at 9 AM
+    
+    const taskAssignments = [];
+    const workingDaysPerWeek = 5; // Mon-Fri
+    const hoursPerDay = 8; // 8 hours per working day
+    
+    // Track developer's currently assigned tasks and end dates
+    const developerEndDates = {};
+    developers.forEach(dev => {
+        developerEndDates[dev.id] = new Date(currentDate);
+    });
+    
+    // Process tasks and assign to most suitable developer
+    allTasks.forEach(task => {
+        // Find the developer that will finish their current tasks first
+        let selectedDeveloper = developers[0];
+        let earliestEndDate = developerEndDates[developers[0].id];
+        
+        developers.forEach(dev => {
+            const devEndDate = developerEndDates[dev.id];
+            if (devEndDate < earliestEndDate) {
+                earliestEndDate = devEndDate;
+                selectedDeveloper = dev;
+            }
+        });
+        
+        // Calculate start date (when the developer will be available)
+        const startDate = new Date(developerEndDates[selectedDeveloper.id]);
+        
+        // Calculate duration in days
+        const durationInWeeks = task.estimatedHours / selectedDeveloper.hoursPerWeek;
+        const durationInDays = Math.ceil(durationInWeeks * workingDaysPerWeek);
+        
+        // Calculate end date
+        const endDate = new Date(startDate);
+        
+        // Add duration days (skipping weekends)
+        let daysAdded = 0;
+        while (daysAdded < durationInDays) {
+            endDate.setDate(endDate.getDate() + 1);
+            const dayOfWeek = endDate.getDay();
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip Saturday (6) and Sunday (0)
+                daysAdded++;
+            }
+        }
+        
+        // Record assignment
+        const assignmentTitle = task.isSubtask 
+            ? `${task.parentTitle} > ${task.title}` 
+            : task.title;
+            
+        taskAssignments.push({
+            taskId: task.id,
+            taskTitle: assignmentTitle,
+            developerId: selectedDeveloper.id,
+            developerName: selectedDeveloper.name,
+            startDate,
+            endDate,
+            estimatedHours: task.estimatedHours,
+            isSubtask: task.isSubtask,
+            parentId: task.parentId
+        });
+        
+        // Update developer's available hours
+        selectedDeveloper.availableHours -= task.estimatedHours;
+        if (selectedDeveloper.availableHours < 0) selectedDeveloper.availableHours = 0;
+        
+        // Add task to developer's tasks
+        selectedDeveloper.tasks.push({
+            id: task.id,
+            title: assignmentTitle,
+            estimatedHours: task.estimatedHours,
+            startDate,
+            endDate,
+            isSubtask: task.isSubtask
+        });
+        
+        // Update developer's end date for next task allocation
+        developerEndDates[selectedDeveloper.id] = new Date(endDate);
+    });
+    
+    // Save allocation to state
+    state.workAllocation.developers = developers;
+    state.workAllocation.taskAssignments = taskAssignments;
+    
+    // Save work allocation to localStorage
+    saveWorkAllocationData();
+    
+    // Generate Gantt chart
+    generateGanttChart(taskAssignments);
+    
+    // Hide modal
+    hideDeveloperModal();
+    
+    // Show success message
+    showNotification('Tasks have been allocated successfully', 'success');
+}
+
+function generateGanttChart(taskAssignments) {
+    if (!taskAssignments || taskAssignments.length === 0) {
+        showNotification('No tasks to display in Gantt chart', 'warning');
+        return;
+    }
+    
+    // Show chart container
+    elements.ganttChartContainer.classList.remove('hidden');
+    elements.ganttChartContainer.classList.add('show');
+    
+    // Destroy any existing chart
+    if (window.ganttChart) {
+        // If we're using the React component, unmount it
+        if (window.isReactGantt) {
+            GanttChartReact.unmountGanttChart(elements.ganttChartContainer);
+            window.ganttChart = null;
+            window.isReactGantt = false;
+        } else {
+            // If we're using Chart.js, destroy it
+            window.ganttChart.destroy();
+            window.ganttChart = null;
+        }
+    }
+    
+    // Clear the canvas if it exists
+    if (elements.ganttChart) {
+        const ctx = elements.ganttChart.getContext('2d');
+        ctx.clearRect(0, 0, elements.ganttChart.width, elements.ganttChart.height);
+    }
+    
+    // Save the original task assignments for filtering
+    window.originalTaskAssignments = [...taskAssignments];
+    
+    // Use React-based gantt chart
+    const handleTaskDateChange = (task) => {
+        console.log('Task date changed:', task);
+        // Implement date change handling logic here
+    };
+    
+    const handleTaskClick = (task) => {
+        console.log('Task clicked:', task);
+        // Implement task click handling logic here
+    };
+    
+    const handleTaskDoubleClick = (task) => {
+        console.log('Task double-clicked:', task);
+        // Implement task double-click handling logic here
+    };
+    
+    // Render the React-based Gantt chart
+    GanttChartReact.renderGanttChart({
+        taskAssignments: taskAssignments,
+        container: elements.ganttChartContainer,
+        onDateChange: handleTaskDateChange,
+        onTaskClick: handleTaskClick,
+        onDblClick: handleTaskDoubleClick
+    });
+    
+    // Mark that we're using the React-based Gantt chart
+    window.isReactGantt = true;
+    window.ganttChart = true; // Just to indicate that we have an active chart
+    
+    // Scroll to chart
+    elements.ganttChartContainer.scrollIntoView({ behavior: 'smooth' });
+}
+
+// Save work allocation data to localStorage
+function saveWorkAllocationData() {
+    const workAllocationData = {
+        developers: state.workAllocation.developers,
+        taskAssignments: state.workAllocation.taskAssignments
+    };
+    
+    localStorage.setItem('workAllocationData', JSON.stringify(workAllocationData));
+}
+
+// Load work allocation data from localStorage
+function loadWorkAllocationData() {
+    const savedData = localStorage.getItem('workAllocationData');
+    if (savedData) {
+        try {
+            const parsedData = JSON.parse(savedData);
+            state.workAllocation.developers = parsedData.developers || [];
+            state.workAllocation.taskAssignments = parsedData.taskAssignments || [];
+            
+            // If we have task assignments, regenerate the Gantt chart
+            if (state.workAllocation.taskAssignments.length > 0) {
+                generateGanttChart(state.workAllocation.taskAssignments);
+            }
+        } catch (error) {
+            console.error('Error parsing work allocation data:', error);
         }
     }
 }

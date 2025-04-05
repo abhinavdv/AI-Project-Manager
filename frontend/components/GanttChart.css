@@ -1,0 +1,136 @@
+/* Gantt Chart Styles */
+.gantt-chart-container {
+  background-color: #192039;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.gantt-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 15px;
+}
+
+.gantt-chart-title {
+  color: #ffffff;
+  font-size: 1.5rem;
+  margin: 0;
+}
+
+.gantt-chart-controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.filter-button {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+  padding: 5px 15px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.filter-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.filter-button.active {
+  background-color: #4c6ef5;
+  color: white;
+  border-color: #4c6ef5;
+}
+
+.gantt-chart-wrapper {
+  height: 500px;
+  overflow: auto;
+  margin-bottom: 20px;
+}
+
+/* Custom styles for gantt-task-react */
+:root {
+  --gantt-task-background: rgba(255, 255, 255, 0.05);
+  --gantt-grid-line-color: rgba(255, 255, 255, 0.1);
+  --gantt-border-color: rgba(255, 255, 255, 0.2);
+  --gantt-text-color: rgba(255, 255, 255, 0.9);
+  --gantt-milestone-color: #3b82f6;
+  --gantt-today-color: rgba(79, 70, 229, 0.3);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 20px;
+  padding: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 15px;
+  transition: all 0.2s ease;
+}
+
+.chart-legend-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.chart-legend-item.inactive {
+  opacity: 0.5;
+}
+
+.chart-legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.chart-legend-text {
+  font-size: 0.85rem;
+  color: #ddd;
+}
+
+/* Override gantt-task-react styles for dark mode */
+.gantt .gantt-container,
+.gantt .calendar,
+.gantt .bar-wrapper,
+.gantt-timeline {
+  background-color: #192039 !important;
+  color: #ffffff !important;
+}
+
+.gantt .grid-row,
+.gantt .grid-header-row {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.gantt .grid-cell,
+.gantt .grid-header-cell {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.gantt text {
+  fill: rgba(255, 255, 255, 0.8) !important;
+}
+
+.gantt-tooltip {
+  background-color: #272e4d !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: white !important;
+} 
