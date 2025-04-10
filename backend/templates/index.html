@@ -51,9 +51,9 @@
                     <i class="material-icons">add_circle</i>
                     <span>New Project</span>
                 </button>
-                <button id="existing-project-mode" class="mode-btn">
+                <button id="existing-project-mode" class="mode-btn existing-project-btn">
                     <i class="material-icons">folder_open</i>
-                    <span>Existing Project</span>
+                    <span>Existing Project (Work in Progress)</span>
                 </button>
             </div>
 
@@ -143,19 +143,47 @@
                     <p>Start a new project by describing your requirements.</p>
                     <div class="audio-controls-container">
                         <div class="audio-controls">
-                            <button id="start-recording" class="btn primary">
-                                <i class="material-icons">mic</i> Start Recording
-                            </button>
-                            <button id="stop-recording" class="btn danger hidden">
-                                <i class="material-icons">stop</i> Stop Recording
-                            </button>
-                            <div id="recording-indicator" class="hidden">
-                                <div class="recording-wave">
-                                    <div class="wave"></div>
-                                    <div class="wave"></div>
-                                    <div class="wave"></div>
+                            <div class="recording-controls">
+                                <button id="start-recording" class="btn primary">
+                                    <div class="recording-icon-container">
+                                        <i class="material-icons">mic</i>
+                                    </div>
+                                    <div class="recording-content">
+                                        <h3 class="recording-heading">Start Recording</h3>
+                                        <span class="recording-text">Click to record your project requirements</span>
+                                    </div>
+                                </button>
+                                <button id="stop-recording" class="btn primary hidden">
+                                    <i class="material-icons">stop</i> Stop Recording
+                                </button>
+                                <div id="recording-indicator" class="recording-indicator hidden">
+                                    <span class="pulse"></span> Recording...
                                 </div>
-                                <span>Recording...</span>
+                                <div class="upload-controls">
+                                    <input type="file" id="audio-upload" accept="audio/*" class="hidden">
+                                    <div id="upload-audio-area" class="upload-audio-area">
+                                        <div class="upload-icon-container">
+                                            <i class="material-icons upload-icon">cloud_upload</i>
+                                            <div class="upload-ripple"></div>
+                                        </div>
+                                        <div class="upload-content">
+                                            <h3 class="upload-heading">Upload Audio</h3>
+                                            <span class="upload-text">Drag and drop your audio file here</span>
+                                            <button id="upload-audio-btn" class="btn primary-gradient">
+                                                <i class="material-icons">upload_file</i> Choose File
+                                            </button>
+                                            <div class="upload-formats-container">
+                                                <span class="format-label">Supported formats:</span>
+                                                <div class="format-badges">
+                                                    <span class="format-badge">MP3</span>
+                                                    <span class="format-badge">WAV</span>
+                                                    <span class="format-badge">M4A</span>
+                                                    <span class="format-badge">FLAC</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -214,11 +242,17 @@
                         <button id="back-to-prompt-btn" class="btn secondary">
                             <i class="material-icons">arrow_back</i> Back
                         </button>
+                        <button id="download-tasks-btn" class="btn secondary">
+                            <i class="material-icons">file_download</i> Download Tasks as TXT
+                        </button>
                         <button id="allocate-work-btn" class="btn secondary">
                             <i class="material-icons">people</i> Allocate Work to Users
                         </button>
                         <button id="proceed-to-repo-btn" class="btn primary">
                             Create Repository <i class="material-icons">arrow_forward</i>
+                        </button>
+                        <button id="update-issues-btn" class="btn primary hidden">
+                            <i class="material-icons">sync</i> Update Issues
                         </button>
                     </div>
                     
@@ -450,6 +484,17 @@
             <div id="gantt-chart-container" class="chart-container hidden">
                 <div class="gantt-chart-header">
                     <h3 class="gantt-chart-title">Work Allocation Plan</h3>
+                    <div class="gantt-chart-actions">
+                        <button id="talk-to-gantt" class="btn btn-small" title="Modify Gantt Chart with Voice">
+                            <i class="material-icons">mic</i> Talk to Chart
+                        </button>
+                        <button id="export-gantt-json" class="btn btn-small" title="Export Gantt Chart">
+                            <i class="material-icons">file_download</i> Export
+                        </button>
+                        <button id="import-gantt-json" class="btn btn-small" title="Import Gantt Chart">
+                            <i class="material-icons">file_upload</i> Import
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="gantt-chart-controls">

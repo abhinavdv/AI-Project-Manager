@@ -12,6 +12,7 @@ const state = {
     issues: [],
     loading: false,
     activeStep: 1,
+    transcription: '', // Add this line
     
     // Theme
     theme: 'dark', // Default theme
@@ -24,7 +25,9 @@ const state = {
         1: false, // Voice Input
         2: false, // Instructions
         3: false, // Tasks
-        4: false  // Repository
+        4: false, // Repository
+        5: false, // Create Issues
+        6: false  // Results
     },
     
     // Input state
@@ -32,13 +35,13 @@ const state = {
         1: '', // Voice recording/transcription
         2: '', // Prompt text
         3: { bigGoals: [], smallGoals: {} }, // Combined tasks
-        4: { name: '', description: '' } // Repository info
+        4: { name: '', description: '' }, // Repository info
+        5: { name: '', description: '' }  // Repository creation result
     },
     
     // Voice/audio state
     mediaRecorder: null,
     audioChunks: [],
-    transcription: '',
     voiceChat: {
         isActive: false,
         activeTaskId: null,
@@ -51,11 +54,17 @@ const state = {
         mediaRecorder: null,
         audioChunks: []
     },
+    ganttModification: {
+        isActive: false,
+        mediaRecorder: null,
+        audioChunks: []
+    },
     
     // Work allocation state
     workAllocation: {
         developers: [],
-        taskAssignments: []
+        taskAssignments: [],
+        ganttChartJson: ''
     }
 };
 
@@ -178,7 +187,9 @@ const elements = {
     // Step 3: Tasks
     tasksContainer: document.getElementById('tasks-container'),
     backToPromptBtn: document.getElementById('back-to-prompt-btn'),
+    downloadTasksBtn: document.getElementById('download-tasks-btn'),
     proceedToRepoBtn: document.getElementById('proceed-to-repo-btn'),
+    updateIssuesBtn: document.getElementById('update-issues-btn'),
     
     // Step 4: Repository
     repoNameInput: document.getElementById('repo-name'),
@@ -745,6 +756,7 @@ function renderSmallGoals() {
                         </div>
                     </div>
                     ${smallGoal.description ? `<div class="goal-description">${smallGoal.description}</div>` : ''}
+                    <div class="estimated-hours">Estimated Hours: ${smallGoal.estimatedHours || 'N/A'}</div>
                 `;
                 
                 smallGoalsWrapper.appendChild(smallGoalCard);
@@ -1075,45 +1087,67 @@ async function createIssues() {
             const baseProgress = 10 + (i * progressPerTask);
             
             // Update loading message
-            elements.loadingMessage.textContent = `Creating issue for: "${task.title}"`;
+            elements.loadingMessage.textContent = `Creating broad goal: "${task.title}"`;
             updateLoadingPercentage(baseProgress);
             
-            // Create parent issue
+            // Create parent issue (broad goal)
             const repoName = state.repository.name;
-            const parentIssue = await fetch(`/api/repository/${repoName}/issues`, {
+            const parentResponse = await fetch(`/api/repository/${repoName}/issues`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     title: task.title,
-                    body: task.description 
+                    body: task.description,
+                    is_broad_goal: true,  // This is a broad goal
+                    is_specific_goal: false
                 })
-            }).then(res => res.json());
+            });
             
-            if (!parentIssue || parentIssue.error) {
-                throw new Error(`Failed to create parent issue: ${parentIssue?.error || 'Unknown error'}`);
+            if (!parentResponse.ok) {
+                const errorText = await parentResponse.text();
+                throw new Error(`Failed to create broad goal: ${errorText}`);
             }
             
-            console.log('Created parent issue:', parentIssue);
+            const parentIssue = await parentResponse.json();
+            console.log('Created broad goal issue:', parentIssue);
             
-            // Create sub-task issues
+            // Delay to ensure the parent issue is fully created before adding sub-issues
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Create sub-goals as sub-issues
             if (task.sub_tasks && task.sub_tasks.length > 0) {
                 for (const subTask of task.sub_tasks) {
-                    elements.loadingMessage.textContent = `Creating sub-task: "${subTask.title}"`;
+                    elements.loadingMessage.textContent = `Creating specific goal: "${subTask.title}"`;
                     
-                    const subTaskIssue = await fetch(`/api/repository/${repoName}/issues`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            title: subTask.title,
-                            body: `${subTask.description}\n\nParent: #${parentIssue.number}`
-                        })
-                    }).then(res => res.json());
-                    
-                    if (!subTaskIssue || subTaskIssue.error) {
-                        showNotification(`Failed to create sub-task: ${subTask.title}`, 'warning');
+                    try {
+                        const subTaskResponse = await fetch(`/api/repository/${repoName}/issues`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                title: subTask.title,
+                                body: subTask.description || '',
+                                is_broad_goal: false,
+                                is_specific_goal: true,  // This is a specific goal
+                                parent_issue_number: parentIssue.number  // Link to parent
+                            })
+                        });
+                        
+                        if (!subTaskResponse.ok) {
+                            const errorText = await subTaskResponse.text();
+                            console.error(`Error creating specific goal: ${errorText}`);
+                            showNotification(`Failed to create specific goal: ${subTask.title}`, 'warning');
+                            continue;
+                        }
+                        
+                        const subTaskIssue = await subTaskResponse.json();
+                        console.log('Created specific goal as sub-issue:', subTaskIssue);
+                        
+                        // Delay to ensure each sub-issue is fully processed
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    } catch (subTaskError) {
+                        console.error('Error creating specific goal:', subTaskError);
+                        showNotification(`Error creating specific goal: ${subTask.title}`, 'warning');
                     }
-                    
-                    console.log('Created sub-task issue:', subTaskIssue);
                 }
             }
             
@@ -1127,7 +1161,7 @@ async function createIssues() {
         setTimeout(() => {
             hideLoading();
             router.navigate('/results');
-            showNotification('All issues created successfully!', 'success');
+            showNotification('All goals created successfully as GitHub issues!', 'success');
         }, 500);
         
     } catch (error) {
@@ -1238,7 +1272,8 @@ function resetApplication() {
     // Reset work allocation
     state.workAllocation = {
         developers: [],
-        taskAssignments: []
+        taskAssignments: [],
+        ganttChartJson: ''
     };
     
     // Hide gantt chart
@@ -1300,6 +1335,14 @@ function setupEventListeners() {
         router.navigate('/tasks');
     });
     elements.backToPromptBtn.addEventListener('click', () => router.navigate('/instructions'));
+    
+    // Add event listener for download tasks button
+    if (elements.downloadTasksBtn) {
+        elements.downloadTasksBtn.addEventListener('click', downloadTasksAsCSV);
+    } else {
+        console.error('Download tasks button not found in the DOM');
+    }
+    
     elements.proceedToRepoBtn.addEventListener('click', () => router.navigate('/new-repo'));
     elements.createRepoBtn.addEventListener('click', async () => {
         await createRepository();
@@ -1387,6 +1430,15 @@ function setupEventListeners() {
     // Load repositories button
     elements.loadReposBtn.addEventListener('click', loadRepositories);
 
+    // Update Issues button event listener
+    if (elements.updateIssuesBtn) {
+        console.log('Setting up update-issues-btn event listener');
+        elements.updateIssuesBtn.addEventListener('click', async () => {
+            console.log('Update issues button clicked');
+            await updateIssues();
+        });
+    }
+    
     // Create repository event listener
     const createRepoBtn = document.getElementById('create-repo-btn');
     if (createRepoBtn) {
@@ -1414,6 +1466,8 @@ function setupEventListeners() {
     } else {
         console.error('Create repository button not found!');
     }
+    
+    // Note: Gantt chart button event listeners are now set in setupGanttChartButtonListeners()
 }
 
 function createRippleEffect(event) {
@@ -1976,21 +2030,29 @@ function updateStepIndicators() {
 
 // Check if a step has any data entered
 function hasDataForStep(stepNum) {
-    switch (stepNum) {
-        case 1:
-            return state.transcription.trim() !== '';
-        case 2:
-            return state.prompt.trim() !== '';
-        case 3:
-            return state.bigGoals.length > 0;
-        case 4:
-            return Object.values(state.smallGoals).some(goals => goals.length > 0);
-        case 5:
-            return state.savedInputs[5].name.trim() !== '' || state.savedInputs[5].description.trim() !== '';
-        case 6:
-            return state.issues.length > 0;
-        default:
-            return false;
+    try {
+        switch (stepNum) {
+            case 1:
+                return (state.transcription || '').trim() !== '';
+            case 2:
+                return (state.prompt || '').trim() !== '';
+            case 3:
+                return Array.isArray(state.bigGoals) && state.bigGoals.length > 0;
+            case 4:
+                return Object.values(state.smallGoals || {}).some(goals => Array.isArray(goals) && goals.length > 0);
+            case 5:
+                return state.savedInputs && 
+                       state.savedInputs[5] && 
+                       ((state.savedInputs[5].name || '').trim() !== '' || 
+                        (state.savedInputs[5].description || '').trim() !== '');
+            case 6:
+                return Array.isArray(state.issues) && state.issues.length > 0;
+            default:
+                return false;
+        }
+    } catch (error) {
+        console.error('Error in hasDataForStep:', error);
+        return false;
     }
 }
 
@@ -2219,13 +2281,25 @@ async function transcribeAudio(audioBlob) {
         updateLoadingPercentage(70);
         
         if (!response.ok) {
-            throw new Error('Transcription failed');
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Transcription failed');
         }
         
         const result = await response.json();
         
         // Processing finished
         updateLoadingPercentage(90);
+        
+        // Check if the result contains an error message
+        if (result.text && (
+            result.text.startsWith('Speech recognition error:') ||
+            result.text.startsWith('Speech recognition canceled:') ||
+            result.text.startsWith('Could not recognize') ||
+            result.text.startsWith('Failed to process') ||
+            result.text.startsWith('There was an error')
+        )) {
+            throw new Error(result.text);
+        }
         
         state.transcription = result.text;
         
@@ -2237,6 +2311,9 @@ async function transcribeAudio(audioBlob) {
         elements.transcriptionText.textContent = state.transcription;
         elements.transcriptionContainer.classList.remove('hidden');
         
+        // Show success notification
+        showNotification('Audio transcribed successfully!', 'success');
+        
         // Completed
         updateLoadingPercentage(100);
         setTimeout(() => {
@@ -2244,8 +2321,14 @@ async function transcribeAudio(audioBlob) {
         }, 200);
         
     } catch (error) {
-        showNotification('Failed to transcribe audio. Please try again.', 'error');
+        console.error('Transcription error:', error);
+        showNotification(error.message || 'Failed to transcribe audio. Please try again.', 'error');
         hideLoading();
+        
+        // Reset UI
+        elements.audioPreview.classList.add('hidden');
+        elements.startRecordingBtn.classList.remove('hidden');
+        elements.transcriptionContainer.classList.add('hidden');
     }
 }
 
@@ -2315,10 +2398,15 @@ function renderTasks() {
             const subTaskElement = document.createElement('div');
             subTaskElement.className = 'subtask';
             subTaskElement.dataset.id = subTask.id;
+            const estimatedHours = subTask.estimatedHours || '';
             subTaskElement.innerHTML = `
                 <div class="task-input-group">
                     <input type="text" class="task-title" value="${subTask.title}" placeholder="Sub-task title">
                     <textarea class="task-description" placeholder="Sub-task description">${subTask.description}</textarea>
+                    <div class="estimated-hours-container">
+                        <label for="estimated-hours-${subTask.id}">Estimated Hours:</label>
+                        <input type="number" id="estimated-hours-${subTask.id}" class="estimated-hours" min="1" max="40" value="${estimatedHours}" placeholder="Hours">
+                    </div>
                 </div>
                 <div class="task-actions">
                     <button class="btn-icon delete-subtask" title="Delete Sub-task">
@@ -2365,10 +2453,18 @@ function addTaskEventListeners() {
     document.querySelectorAll('.modify-tasks-voice').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation(); // Prevent event bubbling
-            if (e.currentTarget.classList.contains('recording')) {
-                stopTaskModificationRecording();
-            } else {
+            
+            // Make sure taskState has the latest data before starting recording
+            if (!e.currentTarget.classList.contains('recording')) {
+                // Update taskState with current UI data if needed
+                if (!taskState.tasksJson || taskState.tasksJson === '') {
+                    const currentTasks = getUnifiedTasksJson();
+                    taskState.tasksJson = JSON.stringify(currentTasks.tasks);
+                    console.log('Updated taskState with current UI tasks before recording');
+                }
                 startTaskModificationRecording();
+            } else {
+                stopTaskModificationRecording();
             }
         });
     });
@@ -2446,7 +2542,8 @@ function addNewSubTask(taskId) {
     const newSubTask = {
         id: newId,
         title: 'New Sub-task',
-        description: 'Describe this sub-task'
+        description: 'Describe this sub-task',
+        estimatedHours: 4 // Default value of 4 hours
     };
     
     state.smallGoals[taskId].push(newSubTask);
@@ -2478,11 +2575,18 @@ function saveTasksState() {
     state.smallGoals = {};
     document.querySelectorAll('.task-section').forEach(section => {
         const taskId = parseInt(section.dataset.id);
-        state.smallGoals[taskId] = Array.from(section.querySelectorAll('.subtask')).map(subtask => ({
-            id: parseInt(subtask.dataset.id),
-            title: subtask.querySelector('.task-title').value,
-            description: subtask.querySelector('.task-description').value
-        }));
+        state.smallGoals[taskId] = Array.from(section.querySelectorAll('.subtask')).map(subtask => {
+            const subtaskId = parseInt(subtask.dataset.id);
+            const estimatedHoursInput = subtask.querySelector('.estimated-hours');
+            const estimatedHours = estimatedHoursInput ? parseFloat(estimatedHoursInput.value) || null : null;
+            
+            return {
+                id: subtaskId,
+                title: subtask.querySelector('.task-title').value,
+                description: subtask.querySelector('.task-description').value,
+                estimatedHours: estimatedHours
+            };
+        });
     });
     
     // Save to step inputs
@@ -2788,8 +2892,19 @@ function displayRepositories(repositories) {
     });
 }
 
-// Add this new function to combine tasks into a single structure
+// Function to combine tasks into a single structure for API calls
 function getUnifiedTasksJson() {
+    // First check if taskState has data
+    const taskStateData = taskState.getTasks();
+    if (taskStateData && taskStateData.length > 0) {
+        console.log('Using taskState data for unified tasks JSON');
+        return {
+            tasks: taskStateData
+        };
+    }
+    
+    // Fall back to state data if taskState is empty
+    console.log('Using state data for unified tasks JSON');
     return {
         tasks: state.bigGoals.map(bigGoal => ({
             id: bigGoal.id,
@@ -2803,45 +2918,91 @@ function getUnifiedTasksJson() {
 
 async function selectRepository(repoName) {
     try {
+        console.log(`Selecting repository: ${repoName}`);
         currentRepository = repoName;
         elements.repoSelector.classList.add('hidden');
         
         showLoading('Loading repository data...', 10);
         
+        console.log(`Fetching tasks for repository: ${repoName}`);
         const tasksResponse = await fetch(`/api/repository/${repoName}/tasks`);
         if (!tasksResponse.ok) {
-            throw new Error('Failed to fetch repository tasks');
+            console.error(`Error response from API: ${tasksResponse.status} ${tasksResponse.statusText}`);
+            throw new Error(`Failed to fetch repository tasks: ${tasksResponse.statusText}`);
         }
         
         const data = await tasksResponse.json();
         console.log('Repository tasks data:', data);
-        
-        // Show steps container and hide tasks container
-        document.getElementById('steps-container').classList.remove('hidden');
-        document.getElementById('tasks-container').classList.add('hidden');
-        document.getElementById('small-goals-container').classList.remove('hidden');
+        console.log('Tasks count:', data.tasks ? data.tasks.length : 0);
         
         if (!data || !data.tasks || !Array.isArray(data.tasks)) {
             throw new Error('Invalid response format');
         }
-
-        // Update taskState with the repository tasks
-        taskState.updateTasks(data.tasks);
         
-        // Show the tasks step (step 3)
-        const tasksStep = document.getElementById('step-3');
-        if (tasksStep) {
-            tasksStep.classList.add('active');
-            tasksStep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Check if there are no tasks in the repository
+        if (data.tasks.length === 0) {
+            throw new Error('No tasks found in this repository. Please select a repository with existing issues.');
         }
         
-        // Update step indicators
-        elements.steps.forEach(step => {
-            step.classList.remove('active');
-            if (parseInt(step.dataset.step) === 3) {
-                step.classList.add('active');
-            }
-        });
+        // Update taskState with the repository tasks
+        taskState.updateTasks({tasks: data.tasks});
+        
+        // Hide repository selector (with null checks)
+        if (elements.repoSelector) {
+            elements.repoSelector.classList.add('hidden');
+        } else {
+            console.warn('Repository selector element not found');
+        }
+        
+        const modeSelector = document.getElementById('mode-selector');
+        if (modeSelector) {
+            modeSelector.classList.add('hidden');
+        } else {
+            console.warn('Mode selector element not found');
+        }
+        
+        // Show the tasks view (with null check)
+        const stepsContainer = document.getElementById('steps-container');
+        if (stepsContainer) {
+            stepsContainer.classList.remove('hidden');
+        } else {
+            console.warn('Steps container element not found');
+        }
+        
+        // Make sure the tasks container and small-goals-container are visible
+        const tasksContainer = document.getElementById('tasks');
+        if (tasksContainer) {
+            tasksContainer.classList.add('active');
+            tasksContainer.style.opacity = '1';
+        } else {
+            console.warn('Tasks container element not found');
+        }
+        
+        const smallGoalsContainer = document.getElementById('small-goals-container');
+        if (smallGoalsContainer) {
+            smallGoalsContainer.classList.remove('hidden');
+        } else {
+            console.warn('Small goals container element not found');
+        }
+        
+        // Toggle buttons for existing project mode (with null checks)
+        if (elements.proceedToRepoBtn) {
+            elements.proceedToRepoBtn.classList.add('hidden');
+        } else {
+            console.warn('Proceed to repo button element not found');
+        }
+        
+        if (elements.updateIssuesBtn) {
+            elements.updateIssuesBtn.classList.remove('hidden');
+        } else {
+            console.warn('Update issues button element not found');
+        }
+        
+        // Make sure the tasks are displayed
+        taskState.renderTasks();
+        
+        // Update step indicators to show we're on the tasks step
+        updateActiveStep(3);
         
         hideLoading();
         showNotification('Repository loaded successfully', 'success');
@@ -2849,6 +3010,28 @@ async function selectRepository(repoName) {
         console.error('Error in selectRepository:', error);
         hideLoading();
         showNotification(error.message, 'error');
+        
+        // Return to home page/repository selection when there's an error
+        setTimeout(() => {
+            // Show repository selector again (with null checks)
+            if (elements.repoSelector) {
+                elements.repoSelector.classList.remove('hidden');
+            }
+            
+            const modeSelector = document.getElementById('mode-selector');
+            if (modeSelector) {
+                modeSelector.classList.remove('hidden');
+            }
+            
+            // Hide steps container (with null check)
+            const stepsContainer = document.getElementById('steps-container');
+            if (stepsContainer) {
+                stepsContainer.classList.add('hidden');
+            }
+            
+            // Reset current repository
+            currentRepository = null;
+        }, 1500); // Short delay to allow the user to read the error message
     }
 }
 
@@ -2908,6 +3091,11 @@ elements.newProjectMode.addEventListener('click', () => {
     elements.newProjectMode.classList.add('active');
     elements.existingProjectMode.classList.remove('active');
     elements.repoSelector.classList.add('hidden');
+    
+    // Toggle buttons for new project mode
+    elements.proceedToRepoBtn.classList.remove('hidden');
+    elements.updateIssuesBtn.classList.add('hidden');
+    
     showStep(1);
 });
 
@@ -2916,8 +3104,300 @@ elements.existingProjectMode.addEventListener('click', () => {
     elements.newProjectMode.classList.remove('active');
     elements.repoSelector.classList.remove('hidden');
     hideAllSteps();
+    
+    // Toggle buttons for existing project mode
+    elements.proceedToRepoBtn.classList.add('hidden');
+    elements.updateIssuesBtn.classList.remove('hidden');
+    
     loadRepositories();
 });
+
+// Implement the updateIssues function for existing projects
+async function updateIssues() {
+    if (!currentRepository) {
+        showNotification('No repository selected', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading('Updating GitHub issues...', 10);
+        
+        // Get the latest tasks data
+        let tasks = taskState.getTasks();
+        if (!tasks || tasks.length === 0) {
+            throw new Error('No tasks available to update issues');
+        }
+
+        console.log('Tasks for updating issues:', tasks);
+        
+        // First, get all existing issues
+        elements.loadingMessage.textContent = 'Fetching existing issues...';
+        updateLoadingPercentage(15);
+        
+        const issuesResponse = await fetch(`/api/repository/${currentRepository}/issues`);
+        if (!issuesResponse.ok) {
+            throw new Error('Failed to fetch existing issues');
+        }
+        
+        const existingIssues = await issuesResponse.json();
+        console.log('Existing issues:', existingIssues);
+        
+        // Create a map of current task IDs (both high-level and sub-tasks)
+        const currentTaskIds = new Map();
+        
+        // Process high-level tasks
+        tasks.forEach(task => {
+            // Store high-level task title as key
+            currentTaskIds.set(task.title, { type: 'high-level', task });
+            
+            // Process sub-tasks if any
+            if (task.sub_tasks && task.sub_tasks.length > 0) {
+                task.sub_tasks.forEach(subTask => {
+                    currentTaskIds.set(subTask.title, { type: 'sub-task', task: subTask, parentTask: task });
+                });
+            }
+        });
+        
+        console.log('Current task IDs map:', Array.from(currentTaskIds.keys()));
+        
+        // Identify issues to delete (those not in the current task list)
+        const issuesToDelete = [];
+        
+        for (const issue of existingIssues) {
+            // Skip issues that have the same title as a current task
+            if (currentTaskIds.has(issue.title)) {
+                console.log(`Keeping issue #${issue.number}: ${issue.title} (matches current task)`);
+                continue;
+            }
+            
+            issuesToDelete.push(issue);
+        }
+        
+        // Delete issues that are not in the current task list
+        elements.loadingMessage.textContent = `Deleting ${issuesToDelete.length} outdated issues...`;
+        updateLoadingPercentage(20);
+        
+        const deletionResults = { success: 0, failed: 0 };
+        
+        for (const issue of issuesToDelete) {
+            try {
+                elements.loadingMessage.textContent = `Deleting issue #${issue.number}: ${issue.title}`;
+                console.log(`Deleting issue #${issue.number}: ${issue.title}`);
+                
+                const deleteResponse = await fetch(`/api/repository/${currentRepository}/issues/${issue.number}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (!deleteResponse.ok) {
+                    console.error(`Failed to delete issue #${issue.number}:`, await deleteResponse.text());
+                    showNotification(`Warning: Failed to delete issue #${issue.number}`, 'warning');
+                    deletionResults.failed++;
+                } else {
+                    console.log(`Successfully deleted issue #${issue.number}`);
+                    deletionResults.success++;
+                }
+                
+                // Small delay to prevent rate limiting
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+            } catch (deleteError) {
+                console.error(`Error deleting issue #${issue.number}:`, deleteError);
+                showNotification(`Warning: Failed to delete issue #${issue.number}: ${deleteError.message}`, 'warning');
+                deletionResults.failed++;
+            }
+        }
+        
+        // Log deletion summary
+        console.log(`Deletion summary: ${deletionResults.success} deleted, ${deletionResults.failed} failed`);
+        updateLoadingPercentage(25);
+        
+        // Now create or update issues using the current task data
+        elements.loadingMessage.textContent = 'Creating/updating issues...';
+        updateLoadingPercentage(30);
+        
+        // Get the latest tasks data right before creating issues
+        // This ensures we have the most up-to-date tasks, especially after voice modifications
+        tasks = taskState.getTasks();
+        console.log('Creating/updating issues with latest tasks:', tasks);
+        
+        // If we still don't have tasks, show an error
+        if (!tasks || tasks.length === 0) {
+            throw new Error('No tasks available to create issues');
+        }
+        
+        // Create a map of existing issues by title for quick lookup
+        const existingIssuesByTitle = new Map();
+        existingIssues.forEach(issue => {
+            existingIssuesByTitle.set(issue.title, issue);
+        });
+        
+        // Process each task sequentially
+        const totalTasks = tasks.length;
+        const progressPerTask = 60 / totalTasks; // 60% of progress bar for task processing
+        let createdCount = 0;
+        let updatedCount = 0;
+        
+        for (let i = 0; i < totalTasks; i++) {
+            const task = tasks[i];
+            const baseProgress = 30 + (i * progressPerTask);
+            
+            // Check if this high-level task already exists
+            const existingParentIssue = existingIssuesByTitle.get(task.title);
+            let parentIssue;
+            
+            if (existingParentIssue) {
+                // Update existing parent issue if needed
+                elements.loadingMessage.textContent = `Updating broad goal: "${task.title}"`;
+                console.log(`Updating existing broad goal: ${task.title} (#${existingParentIssue.number})`);
+                
+                // Only update if description has changed
+                if (existingParentIssue.body !== (task.description || '')) {
+                    const updateResponse = await fetch(`/api/repository/${currentRepository}/issues/${existingParentIssue.number}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: task.title,
+                            body: task.description || '',
+                            is_parent: true
+                        })
+                    });
+                    
+                    if (!updateResponse.ok) {
+                        console.error(`Failed to update broad goal: ${await updateResponse.text()}`);
+                        showNotification(`Warning: Failed to update broad goal: ${task.title}`, 'warning');
+                    } else {
+                        updatedCount++;
+                        console.log(`Successfully updated broad goal: ${task.title}`);
+                    }
+                }
+                
+                parentIssue = existingParentIssue;
+            } else {
+                // Create new parent issue
+                elements.loadingMessage.textContent = `Creating broad goal: "${task.title}"`;
+                updateLoadingPercentage(baseProgress);
+                
+                const parentResponse = await fetch(`/api/repository/${currentRepository}/issues`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        title: task.title,
+                        body: task.description || '',
+                        is_broad_goal: true,  // This is a broad goal
+                        is_specific_goal: false
+                    })
+                });
+                
+                if (!parentResponse.ok) {
+                    const errorText = await parentResponse.text();
+                    console.error(`Failed to create broad goal: ${errorText}`);
+                    showNotification(`Warning: Failed to create broad goal: ${task.title}`, 'warning');
+                    continue; // Skip sub-tasks if parent creation fails
+                }
+                
+                parentIssue = await parentResponse.json();
+                console.log('Created broad goal issue:', parentIssue);
+                createdCount++;
+                
+                // Delay to ensure the parent issue is fully created before adding sub-issues
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            // Process sub-tasks
+            if (task.sub_tasks && task.sub_tasks.length > 0) {
+                for (const subTask of task.sub_tasks) {
+                    // Check if this sub-task already exists
+                    const existingSubTask = existingIssuesByTitle.get(subTask.title);
+                    
+                    if (existingSubTask) {
+                        // Update existing sub-task if needed
+                        elements.loadingMessage.textContent = `Updating specific goal: "${subTask.title}"`;
+                        console.log(`Updating existing specific goal: ${subTask.title} (#${existingSubTask.number})`);
+                        
+                        // Only update if description or estimated hours have changed
+                        const currentDesc = subTask.description || '';
+                        const currentHours = subTask.estimatedHours || null;
+                        
+                        if (existingSubTask.body !== currentDesc) {
+                            const updateResponse = await fetch(`/api/repository/${currentRepository}/issues/${existingSubTask.number}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    title: subTask.title,
+                                    body: currentDesc,
+                                    is_parent: false,
+                                    estimated_hours: currentHours
+                                })
+                            });
+                            
+                            if (!updateResponse.ok) {
+                                console.error(`Failed to update specific goal: ${await updateResponse.text()}`);
+                                showNotification(`Warning: Failed to update specific goal: ${subTask.title}`, 'warning');
+                            } else {
+                                updatedCount++;
+                                console.log(`Successfully updated specific goal: ${subTask.title}`);
+                            }
+                        }
+                    } else {
+                        // Create new sub-task
+                        elements.loadingMessage.textContent = `Creating specific goal: "${subTask.title}"`;
+                        
+                        try {
+                            const subTaskResponse = await fetch(`/api/repository/${currentRepository}/issues`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    title: subTask.title,
+                                    body: subTask.description || '',
+                                    is_broad_goal: false,
+                                    is_specific_goal: true,  // This is a specific goal
+                                    parent_issue_number: parentIssue.number,  // Link to parent
+                                    estimated_hours: subTask.estimatedHours || null  // Include estimated hours if available
+                                })
+                            });
+                            
+                            if (!subTaskResponse.ok) {
+                                const errorText = await subTaskResponse.text();
+                                console.error(`Error creating specific goal: ${errorText}`);
+                                showNotification(`Failed to create specific goal: ${subTask.title}`, 'warning');
+                                continue;
+                            }
+                            
+                            const subTaskIssue = await subTaskResponse.json();
+                            console.log('Created specific goal as sub-issue:', subTaskIssue);
+                            createdCount++;
+                            
+                            // Delay to ensure each sub-issue is fully processed
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        } catch (subTaskError) {
+                            console.error('Error creating specific goal:', subTaskError);
+                            showNotification(`Error creating specific goal: ${subTask.title}`, 'warning');
+                        }
+                    }
+                }
+            }
+            
+            updateLoadingPercentage(baseProgress + progressPerTask);
+        }
+        
+        elements.loadingMessage.textContent = 'Finalizing issue updates...';
+        updateLoadingPercentage(95);
+        
+        // Update UI and show success message
+        setTimeout(() => {
+            hideLoading();
+            const message = `Successfully updated repository issues: ${createdCount} created, ${updatedCount} updated, ${deletionResults.success} deleted!`;
+            showNotification(message, 'success');
+            loadRepositoryIssues(); // Refresh the issues list
+        }, 500);
+        
+    } catch (error) {
+        console.error('Error updating issues:', error);
+        hideLoading();
+        showNotification(error.message || 'Failed to update issues', 'error');
+    }
+}
 
 // After the showStep function
 function hideAllSteps() {
@@ -3067,69 +3547,203 @@ const taskState = {
         console.log('Updating tasks with:', tasksData);
         
         let processedTasks = [];
+        
+        // Store the original tasks to preserve data that might not be in the new tasks
+        const originalTasks = this.getTasks();
+        const originalSubtasksMap = {};
+        
+        // Create a map of original subtasks by ID to preserve their estimated hours
+        originalTasks.forEach(task => {
+            if (task.sub_tasks && task.sub_tasks.length > 0) {
+                task.sub_tasks.forEach(subtask => {
+                    const subtaskKey = `${task.id}-${subtask.id}`;
+                    originalSubtasksMap[subtaskKey] = subtask;
+                });
+            }
+        });
 
         // Handle direct array format (from modify-tasks-voice endpoint)
         if (Array.isArray(tasksData)) {
             console.log('Processing direct array format');
             processedTasks = tasksData.map(task => {
                 // Ensure task has the expected structure
-                return {
+                const processedTask = {
                     id: task.id || 0,
                     title: task.title || "Untitled task",
                     description: task.description || "",
                     is_parent: task.is_parent !== undefined ? task.is_parent : true,
-                    sub_tasks: Array.isArray(task.sub_tasks) ? task.sub_tasks.map(subTask => ({
-                        id: subTask.id || 0,
-                        title: subTask.title || "Untitled subtask",
-                        description: subTask.description || ""
-                    })) : []
+                    sub_tasks: []
                 };
+                
+                // Process subtasks if they exist
+                if (Array.isArray(task.sub_tasks)) {
+                    processedTask.sub_tasks = task.sub_tasks.map(subTask => {
+                        // Try to find the original subtask to preserve estimated hours
+                        const subtaskKey = `${task.id}-${subTask.id}`;
+                        const originalSubtask = originalSubtasksMap[subtaskKey];
+                        
+                        return {
+                            id: subTask.id || 0,
+                            title: subTask.title || "Untitled subtask",
+                            description: subTask.description || "",
+                            // Preserve estimated hours if available
+                            estimatedHours: subTask.estimatedHours || 
+                                           (originalSubtask ? originalSubtask.estimatedHours : null)
+                        };
+                    });
+                }
+                
+                return processedTask;
             });
         }
         // Handle /analyze API format
         else if (tasksData.big_goals && tasksData.big_goals.goals) {
             console.log('Processing /analyze API format');
-            processedTasks = tasksData.big_goals.goals.map(task => ({
-                id: task.id,
-                title: task.title,
-                description: task.description || '',
-                is_parent: true,
-                sub_tasks: (task.sub_tasks || []).map(subTask => ({
-                    id: subTask.id,
-                    title: subTask.title,
-                    description: subTask.description || ''
-                }))
-            }));
+            processedTasks = tasksData.big_goals.goals.map(task => {
+                const processedTask = {
+                    id: task.id,
+                    title: task.title,
+                    description: task.description || '',
+                    is_parent: true,
+                    sub_tasks: []
+                };
+                
+                // Process subtasks if they exist
+                if (task.sub_tasks && task.sub_tasks.length > 0) {
+                    processedTask.sub_tasks = task.sub_tasks.map(subTask => {
+                        // Try to find the original subtask to preserve estimated hours
+                        const subtaskKey = `${task.id}-${subTask.id}`;
+                        const originalSubtask = originalSubtasksMap[subtaskKey];
+                        
+                        return {
+                            id: subTask.id,
+                            title: subTask.title,
+                            description: subTask.description || '',
+                            // Preserve estimated hours if available
+                            estimatedHours: subTask.estimatedHours || 
+                                           (originalSubtask ? originalSubtask.estimatedHours : null)
+                        };
+                    });
+                }
+                
+                return processedTask;
+            });
         }
         // Handle /tasks API format
         else if (Array.isArray(tasksData.tasks)) {
             console.log('Processing /tasks API format');
+            console.log('Raw tasks data:', tasksData.tasks);
+            
             // First, separate parent and child tasks
-            const parentTasks = tasksData.tasks.filter(task => task.is_parent && task.parent_id === null);
+            const parentTasks = tasksData.tasks.filter(task => task.is_parent || (!task.is_parent && task.parent_id === null));
             const childTasks = tasksData.tasks.filter(task => !task.is_parent && task.parent_id !== null);
+            
+            // Identify orphaned child tasks (those with parent_id that doesn't exist)
+            const orphanedChildTasks = childTasks.filter(child => 
+                !parentTasks.some(parent => parent.number === child.parent_id)
+            );
+            
+            if (orphanedChildTasks.length > 0) {
+                console.log(`Found ${orphanedChildTasks.length} orphaned child tasks without valid parents`);
+            }
             
             console.log('Parent tasks:', parentTasks);
             console.log('Child tasks:', childTasks);
-
-            // Create the hierarchical structure
-            processedTasks = parentTasks.map(parentTask => ({
-                id: parentTask.number,
-                title: parentTask.title,
-                description: parentTask.body || '',
-                is_parent: true,
-                sub_tasks: childTasks
-                    .filter(child => child.parent_id === parentTask.number)
-                    .map(child => ({
-                        id: child.number,
-                        title: child.title,
-                        description: child.body || ''
-                    }))
-            }));
+            console.log('Orphaned child tasks:', orphanedChildTasks);
+            
+            // Handle orphaned child tasks - assign them to the most appropriate parent
+            if (orphanedChildTasks.length > 0 && parentTasks.length > 0) {
+                // For simplicity, assign all orphaned tasks to the first parent
+                // In a more sophisticated implementation, you could use content similarity
+                // to find the most appropriate parent for each orphaned task
+                const firstParent = parentTasks[0];
+                console.log(`Assigning ${orphanedChildTasks.length} orphaned tasks to parent #${firstParent.number}`);
+                
+                // Update the parent_id of each orphaned task
+                orphanedChildTasks.forEach(task => {
+                    task.parent_id = firstParent.number;
+                    console.log(`Assigned orphaned task #${task.number} to parent #${firstParent.number}`);
+                });
+            }
+            
+            // If no parent tasks were found, treat all tasks as parent tasks
+            if (parentTasks.length === 0 && tasksData.tasks.length > 0) {
+                console.log('No parent tasks found, treating all tasks as parents');
+                processedTasks = tasksData.tasks.map(task => ({
+                    id: task.number,
+                    title: task.title,
+                    description: task.body || '',
+                    is_parent: true,
+                    sub_tasks: []
+                }));
+            } else {
+                // Create the hierarchical structure
+                processedTasks = parentTasks.map(parentTask => {
+                    const processedTask = {
+                        id: parentTask.number,
+                        title: parentTask.title,
+                        description: parentTask.body || '',
+                        is_parent: true,
+                        number: parentTask.number, // Store issue number for updates
+                        sub_tasks: []
+                    };
+                    
+                    // Find and add subtasks
+                    const taskSubtasks = childTasks.filter(child => child.parent_id === parentTask.number);
+                    if (taskSubtasks.length > 0) {
+                        processedTask.sub_tasks = taskSubtasks.map(child => {
+                            // Try to find the original subtask to preserve estimated hours
+                            const subtaskKey = `${parentTask.number}-${child.number}`;
+                            const originalSubtask = originalSubtasksMap[subtaskKey];
+                            
+                            return {
+                                id: child.number,
+                                title: child.title,
+                                description: child.body || '',
+                                number: child.number, // Store issue number for updates
+                                // Preserve estimated hours if available
+                                estimatedHours: child.estimatedHours || 
+                                               (originalSubtask ? originalSubtask.estimatedHours : null)
+                            };
+                        });
+                    }
+                    
+                    return processedTask;
+                });
+            }
         }
         // Handle direct goals array
         else if (Array.isArray(tasksData.goals)) {
             console.log('Processing direct goals array');
-            processedTasks = tasksData.goals;
+            processedTasks = tasksData.goals.map(task => {
+                const processedTask = {
+                    id: task.id,
+                    title: task.title,
+                    description: task.description || '',
+                    is_parent: true,
+                    sub_tasks: []
+                };
+                
+                // Process subtasks if they exist
+                if (task.sub_tasks && task.sub_tasks.length > 0) {
+                    processedTask.sub_tasks = task.sub_tasks.map(subTask => {
+                        // Try to find the original subtask to preserve estimated hours
+                        const subtaskKey = `${task.id}-${subTask.id}`;
+                        const originalSubtask = originalSubtasksMap[subtaskKey];
+                        
+                        return {
+                            id: subTask.id,
+                            title: subTask.title,
+                            description: subTask.description || '',
+                            // Preserve estimated hours if available
+                            estimatedHours: subTask.estimatedHours || 
+                                           (originalSubtask ? originalSubtask.estimatedHours : null)
+                        };
+                    });
+                }
+                
+                return processedTask;
+            });
         }
 
         // Sort tasks by ID (ascending order)
@@ -3217,6 +3831,11 @@ const taskState = {
                     subTaskCard.className = 'small-goal-card';
                     subTaskCard.dataset.id = subTask.id;
                     
+                    // Format estimated hours display
+                    const estimatedHoursDisplay = subTask.estimatedHours 
+                        ? `<div class="goal-estimated-hours"><i class="material-icons">schedule</i> ${subTask.estimatedHours} hours</div>` 
+                        : '';
+                    
                     subTaskCard.innerHTML = `
                         <div class="goal-header">
                             <h4>${subTask.title}</h4>
@@ -3226,6 +3845,7 @@ const taskState = {
                             </div>
                         </div>
                         ${subTask.description ? `<div class="goal-description">${subTask.description}</div>` : ''}
+                        ${estimatedHoursDisplay}
                     `;
                     
                     subTasksWrapper.appendChild(subTaskCard);
@@ -3352,7 +3972,19 @@ async function startTaskModificationRecording() {
     }
     
     try {
+        // Check if mediaDevices is available
+        if (!navigator.mediaDevices) {
+            throw new Error('Media devices not available in this browser or context');
+        }
+        
+        // Request microphone access
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Create media recorder
+        if (!window.MediaRecorder) {
+            throw new Error('MediaRecorder not available in this browser');
+        }
+        
         state.taskModification.mediaRecorder = new MediaRecorder(stream);
         state.taskModification.audioChunks = [];
         
@@ -3375,7 +4007,7 @@ async function startTaskModificationRecording() {
         
     } catch (error) {
         console.error('Error accessing microphone:', error);
-        showNotification('Could not access microphone', 'error');
+        showNotification(`Could not access microphone: ${error.message}`, 'error');
         stopTaskModificationRecording();
     }
 }
@@ -3402,11 +4034,20 @@ async function processTaskModificationAudio(audioBlob) {
     try {
         showLoading('Processing your voice modifications for all tasks...', 10);
         
+        // Make sure we have the latest tasks data
+        if (!taskState.tasksJson || taskState.tasksJson === '') {
+            // Get the current tasks from the UI if taskState is empty
+            const currentTasks = getUnifiedTasksJson();
+            taskState.tasksJson = JSON.stringify(currentTasks.tasks);
+            console.log('Updated taskState with current UI tasks:', taskState.tasksJson);
+        }
+        
         // Create form data with audio and current tasks
         const formData = new FormData();
         formData.append('audio', audioBlob);
         formData.append('currentTasks', taskState.tasksJson);
         
+        console.log('Sending tasks data to backend:', taskState.tasksJson);
         updateLoadingPercentage(30);
         
         // Send to backend for processing
@@ -3418,8 +4059,15 @@ async function processTaskModificationAudio(audioBlob) {
         updateLoadingPercentage(60);
         
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to process audio');
+            const errorText = await response.text();
+            let errorMessage = 'Failed to process audio';
+            try {
+                const errorData = JSON.parse(errorText);
+                errorMessage = errorData.error || errorMessage;
+            } catch (e) {
+                errorMessage = errorText || errorMessage;
+            }
+            throw new Error(errorMessage);
         }
         
         const data = await response.json();
@@ -3447,10 +4095,20 @@ async function processTaskModificationAudio(audioBlob) {
         let tasksHaveChanged = false;
         if (data.updatedTasks) {
             try {
-                const currentTasks = JSON.parse(taskState.tasksJson);
-                const updatedTasksStr = JSON.stringify(data.updatedTasks);
+                // Make sure we're comparing arrays
+                const currentTasks = Array.isArray(JSON.parse(taskState.tasksJson)) 
+                    ? JSON.parse(taskState.tasksJson) 
+                    : [];
+                    
+                const updatedTasks = Array.isArray(data.updatedTasks) 
+                    ? data.updatedTasks 
+                    : [];
+                    
+                const updatedTasksStr = JSON.stringify(updatedTasks);
                 const currentTasksStr = JSON.stringify(currentTasks);
+                
                 tasksHaveChanged = updatedTasksStr !== currentTasksStr;
+                console.log('Tasks have changed:', tasksHaveChanged);
             } catch (e) {
                 console.error("Error comparing tasks:", e);
                 tasksHaveChanged = true; // Assume changes if comparison fails
@@ -3459,6 +4117,7 @@ async function processTaskModificationAudio(audioBlob) {
         
         // Update tasks with the response
         if (data.updatedTasks && tasksHaveChanged && !isErrorTranscription) {
+            console.log('Updating tasks with:', data.updatedTasks);
             taskState.updateTasks(data.updatedTasks);
             showNotification('All tasks updated successfully!', 'success');
         } else if (isErrorTranscription) {
@@ -3671,16 +4330,19 @@ function collectDeveloperData() {
 }
 
 function estimateTaskDuration(task) {
-    // Check if we should call Azure AI for estimations
-    const useAzureAI = false; // Set to true if we want to use Azure AI
-    
-    if (useAzureAI) {
-        // This would be the implementation for Azure AI
-        // For now, we'll use a more sophisticated local estimation
-        return estimateTaskDurationLocally(task);
-    } else {
-        return estimateTaskDurationLocally(task);
+    // If there's no task or it's missing key information, return a default value
+    if (!task || (!task.title && !task.description) || 
+        (task.title.length < 3 && (!task.description || task.description.length < 10))) {
+        return 4; // Default 4 hours
     }
+    
+    // If the task has an explicit estimatedHours value, use it
+    if (task.estimatedHours && !isNaN(task.estimatedHours)) {
+        return Math.min(40, Math.max(1, task.estimatedHours)); // Ensure between 1 and 40 hours
+    }
+    
+    // Otherwise, compute an estimate based on text
+    return estimateTaskDurationLocally(task);
 }
 
 function estimateTaskDurationLocally(task) {
@@ -3778,11 +4440,16 @@ function allocateTasks() {
         // Add subtasks if they exist
         if (task.sub_tasks && task.sub_tasks.length > 0) {
             task.sub_tasks.forEach(subtask => {
+                // Use the subtask's estimatedHours if available, otherwise estimate
+                const subtaskHours = subtask.estimatedHours ? 
+                    parseFloat(subtask.estimatedHours) : 
+                    estimateTaskDuration(subtask);
+                
                 allTasks.push({
                     id: `${task.id}-${subtask.id}`, // Create unique ID for subtask
                     title: subtask.title,
                     description: subtask.description || '',
-                    estimatedHours: estimateTaskDuration(subtask) / 2, // Subtasks are typically smaller
+                    estimatedHours: subtaskHours,
                     isSubtask: true,
                     parentId: task.id,
                     parentTitle: task.title
@@ -3895,6 +4562,9 @@ function allocateTasks() {
     state.workAllocation.developers = developers;
     state.workAllocation.taskAssignments = taskAssignments;
     
+    // Generate Gantt chart JSON
+    state.workAllocation.ganttChartJson = createGanttChartJson(taskAssignments);
+    
     // Save work allocation to localStorage
     saveWorkAllocationData();
     
@@ -3913,6 +4583,15 @@ function generateGanttChart(taskAssignments) {
         showNotification('No tasks to display in Gantt chart', 'warning');
         return;
     }
+    
+    // Convert to intermediary JSON string
+    const ganttChartJson = createGanttChartJson(taskAssignments);
+    
+    // Store the JSON string for later use
+    state.workAllocation.ganttChartJson = ganttChartJson;
+    
+    // Parse the JSON string back to get the task assignments
+    const parsedTaskAssignments = parseGanttChartJson(ganttChartJson);
     
     // Show chart container
     elements.ganttChartContainer.classList.remove('hidden');
@@ -3939,7 +4618,7 @@ function generateGanttChart(taskAssignments) {
     }
     
     // Save the original task assignments for filtering
-    window.originalTaskAssignments = [...taskAssignments];
+    window.originalTaskAssignments = [...parsedTaskAssignments];
     
     // Use React-based gantt chart
     const handleTaskDateChange = (task) => {
@@ -3959,7 +4638,7 @@ function generateGanttChart(taskAssignments) {
     
     // Render the React-based Gantt chart
     GanttChartReact.renderGanttChart({
-        taskAssignments: taskAssignments,
+        taskAssignments: parsedTaskAssignments,
         container: elements.ganttChartContainer,
         onDateChange: handleTaskDateChange,
         onTaskClick: handleTaskClick,
@@ -3972,13 +4651,221 @@ function generateGanttChart(taskAssignments) {
     
     // Scroll to chart
     elements.ganttChartContainer.scrollIntoView({ behavior: 'smooth' });
+    
+    // Add the buttons directly to the DOM after rendering
+    setTimeout(() => {
+        injectGanttChartButtons();
+    }, 500);
+}
+
+// Inject buttons directly into the Gantt chart header
+function injectGanttChartButtons() {
+    console.log('Injecting Gantt chart buttons');
+    
+    // Use a mutation observer to detect when the Gantt chart is rendered
+    const injectButtons = () => {
+        // Find the Gantt chart header
+        const ganttHeader = document.querySelector('.gantt-chart-container .gantt-chart-header');
+        if (!ganttHeader) {
+            console.error('Could not find Gantt chart header');
+            return false;
+        }
+        
+        // Check if buttons already exist
+        if (document.getElementById('talk-to-gantt')) {
+            console.log('Buttons already exist');
+            setupGanttChartButtonListeners();
+            return true;
+        }
+        
+        console.log('Found Gantt chart header, injecting buttons');
+        
+        // Create the buttons container
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.className = 'gantt-chart-actions';
+        buttonsContainer.style.display = 'flex';
+        buttonsContainer.style.gap = '10px';
+        buttonsContainer.style.marginLeft = 'auto';
+        buttonsContainer.style.zIndex = '10';
+        
+        // Create Talk to Chart button
+        const talkButton = document.createElement('button');
+        talkButton.id = 'talk-to-gantt';
+        talkButton.className = 'btn btn-small';
+        talkButton.title = 'Modify Gantt Chart with Voice';
+        talkButton.style.display = 'flex';
+        talkButton.style.alignItems = 'center';
+        talkButton.style.gap = '5px';
+        talkButton.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        talkButton.style.color = 'rgba(255, 255, 255, 0.8)';
+        talkButton.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        talkButton.style.borderRadius = '4px';
+        talkButton.style.padding = '5px 10px';
+        talkButton.style.cursor = 'pointer';
+        talkButton.style.minHeight = '32px';
+        talkButton.innerHTML = '<i class="material-icons" style="margin-right: 4px; font-size: 16px;">mic</i> Talk to Chart';
+        
+        // Create Export button
+        const exportButton = document.createElement('button');
+        exportButton.id = 'export-gantt-json';
+        exportButton.className = 'btn btn-small';
+        exportButton.title = 'Export Gantt Chart';
+        exportButton.style.display = 'flex';
+        exportButton.style.alignItems = 'center';
+        exportButton.style.gap = '5px';
+        exportButton.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        exportButton.style.color = 'rgba(255, 255, 255, 0.8)';
+        exportButton.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        exportButton.style.borderRadius = '4px';
+        exportButton.style.padding = '5px 10px';
+        exportButton.style.cursor = 'pointer';
+        exportButton.style.minHeight = '32px';
+        exportButton.innerHTML = '<i class="material-icons" style="margin-right: 4px; font-size: 16px;">file_download</i> Export';
+        
+        // Create Import button
+        const importButton = document.createElement('button');
+        importButton.id = 'import-gantt-json';
+        importButton.className = 'btn btn-small';
+        importButton.title = 'Import Gantt Chart';
+        importButton.style.display = 'flex';
+        importButton.style.alignItems = 'center';
+        importButton.style.gap = '5px';
+        importButton.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        importButton.style.color = 'rgba(255, 255, 255, 0.8)';
+        importButton.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        importButton.style.borderRadius = '4px';
+        importButton.style.padding = '5px 10px';
+        importButton.style.cursor = 'pointer';
+        importButton.style.minHeight = '32px';
+        importButton.innerHTML = '<i class="material-icons" style="margin-right: 4px; font-size: 16px;">file_upload</i> Import';
+        
+        // Add buttons to container
+        buttonsContainer.appendChild(talkButton);
+        buttonsContainer.appendChild(exportButton);
+        buttonsContainer.appendChild(importButton);
+        
+        // Add container to header
+        ganttHeader.appendChild(buttonsContainer);
+        
+        // Add event listeners
+        setupGanttChartButtonListeners();
+        
+        console.log('Gantt chart buttons injected successfully');
+        return true;
+    };
+    
+    // Try to inject the buttons immediately
+    if (injectButtons()) {
+        return;
+    }
+    
+    // If immediate injection fails, set up a mutation observer to wait for the chart to render
+    console.log('Setting up mutation observer for Gantt chart');
+    const observer = new MutationObserver((mutations, obs) => {
+        if (document.querySelector('.gantt-chart-container .gantt-chart-header')) {
+            if (injectButtons()) {
+                // If buttons were successfully injected, disconnect the observer
+                obs.disconnect();
+                console.log('Observer disconnected after successful injection');
+            }
+        }
+    });
+    
+    // Start observing the document with the configured parameters
+    observer.observe(document.body, { childList: true, subtree: true });
+    
+    // Set a timeout to stop the observer after 10 seconds to prevent memory leaks
+    setTimeout(() => {
+        observer.disconnect();
+        console.log('Observer disconnected due to timeout');
+    }, 10000);
+}
+
+// Set up event listeners for Gantt chart buttons
+function setupGanttChartButtonListeners() {
+    // Check if we have direct button access first
+    const talkToGanttBtn = document.getElementById('talk-to-gantt');
+    const exportGanttBtn = document.getElementById('export-gantt-json');
+    const importGanttBtn = document.getElementById('import-gantt-json');
+    
+    // Add event listeners to buttons directly if found
+    if (talkToGanttBtn) {
+        talkToGanttBtn.addEventListener('click', startGanttChartModificationRecording);
+        console.log('Added talk-to-gantt button listener directly');
+    }
+    
+    if (exportGanttBtn) {
+        exportGanttBtn.addEventListener('click', exportGanttChartJson);
+        console.log('Added export-gantt-json button listener directly');
+    }
+    
+    if (importGanttBtn) {
+        importGanttBtn.addEventListener('click', importGanttChartJson);
+        console.log('Added import-gantt-json button listener directly');
+    }
+    
+    // Try using the React component's exposed button references as fallback
+    if (window.ganttChartButtons) {
+        console.log('Using button references from React component');
+        
+        if (window.ganttChartButtons.talkToGantt && !talkToGanttBtn) {
+            window.ganttChartButtons.talkToGantt.addEventListener('click', startGanttChartModificationRecording);
+            console.log('Added talk-to-gantt button listener via React ref');
+        }
+        
+        if (window.ganttChartButtons.exportGantt && !exportGanttBtn) {
+            window.ganttChartButtons.exportGantt.addEventListener('click', exportGanttChartJson);
+            console.log('Added export-gantt-json button listener via React ref');
+        }
+        
+        if (window.ganttChartButtons.importGantt && !importGanttBtn) {
+            window.ganttChartButtons.importGantt.addEventListener('click', importGanttChartJson);
+            console.log('Added import-gantt-json button listener via React ref');
+        }
+    } else {
+        console.log('Button references from React component not available');
+    }
+}
+
+// Convert task assignments to a JSON string for the Gantt chart
+function createGanttChartJson(taskAssignments) {
+    if (!taskAssignments || taskAssignments.length === 0) {
+        return '';
+    }
+    
+    // Create a copy to avoid modifying the original
+    const ganttData = {
+        taskAssignments: JSON.parse(JSON.stringify(taskAssignments)),
+        metadata: {
+            created: new Date().toISOString(),
+            version: '1.0'
+        }
+    };
+    
+    return JSON.stringify(ganttData);
+}
+
+// Parse a JSON string to get task assignments for the Gantt chart
+function parseGanttChartJson(jsonString) {
+    if (!jsonString) {
+        return [];
+    }
+    
+    try {
+        const ganttData = JSON.parse(jsonString);
+        return ganttData.taskAssignments || [];
+    } catch (error) {
+        console.error('Error parsing Gantt chart JSON:', error);
+        return [];
+    }
 }
 
 // Save work allocation data to localStorage
 function saveWorkAllocationData() {
     const workAllocationData = {
         developers: state.workAllocation.developers,
-        taskAssignments: state.workAllocation.taskAssignments
+        taskAssignments: state.workAllocation.taskAssignments,
+        ganttChartJson: state.workAllocation.ganttChartJson
     };
     
     localStorage.setItem('workAllocationData', JSON.stringify(workAllocationData));
@@ -3992,13 +4879,643 @@ function loadWorkAllocationData() {
             const parsedData = JSON.parse(savedData);
             state.workAllocation.developers = parsedData.developers || [];
             state.workAllocation.taskAssignments = parsedData.taskAssignments || [];
+            state.workAllocation.ganttChartJson = parsedData.ganttChartJson || '';
             
-            // If we have task assignments, regenerate the Gantt chart
-            if (state.workAllocation.taskAssignments.length > 0) {
+            // If we have a gantt chart JSON, use it to regenerate the chart
+            if (state.workAllocation.ganttChartJson) {
+                const parsedTaskAssignments = parseGanttChartJson(state.workAllocation.ganttChartJson);
+                if (parsedTaskAssignments.length > 0) {
+                    generateGanttChart(parsedTaskAssignments);
+                }
+            } 
+            // Fallback to task assignments if no JSON is available
+            else if (state.workAllocation.taskAssignments.length > 0) {
                 generateGanttChart(state.workAllocation.taskAssignments);
             }
         } catch (error) {
             console.error('Error parsing work allocation data:', error);
         }
     }
+}
+
+// Update Gantt chart from a JSON string
+function updateGanttChartFromJson(jsonString) {
+    if (!jsonString) {
+        showNotification('No Gantt chart data provided', 'warning');
+        return false;
+    }
+    
+    try {
+        // Parse the JSON string to get task assignments
+        const parsedTaskAssignments = parseGanttChartJson(jsonString);
+        
+        if (!parsedTaskAssignments || parsedTaskAssignments.length === 0) {
+            showNotification('No tasks found in the provided Gantt chart data', 'warning');
+            return false;
+        }
+        
+        // Store the JSON string
+        state.workAllocation.ganttChartJson = jsonString;
+        
+        // Update task assignments
+        state.workAllocation.taskAssignments = parsedTaskAssignments;
+        
+        // Save to localStorage
+        saveWorkAllocationData();
+        
+        // Generate the Gantt chart
+        generateGanttChart(parsedTaskAssignments);
+        
+        showNotification('Gantt chart updated successfully', 'success');
+        return true;
+    } catch (error) {
+        console.error('Error updating Gantt chart from JSON:', error);
+        showNotification('Failed to update Gantt chart: ' + error.message, 'error');
+        return false;
+    }
+}
+
+// Export Gantt chart data as JSON file
+function exportGanttChartJson() {
+    if (!state.workAllocation.ganttChartJson) {
+        showNotification('No Gantt chart data available to export', 'warning');
+        return;
+    }
+    
+    // Format the JSON for readability
+    const formattedJson = JSON.stringify(JSON.parse(state.workAllocation.ganttChartJson), null, 2);
+    
+    // Create a blob with the JSON data
+    const blob = new Blob([formattedJson], { type: 'application/json' });
+    
+    // Create an object URL for the blob
+    const url = URL.createObjectURL(blob);
+    
+    // Create a temporary anchor element
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gantt_chart_data.json';
+    
+    // Append to the document, click, and clean up
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    // Revoke the object URL to free up memory
+    URL.revokeObjectURL(url);
+    
+    showNotification('Gantt chart data exported successfully', 'success');
+}
+
+// Import Gantt chart data from a JSON file
+function importGanttChartJson() {
+    // Create a file input element
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'application/json';
+    
+    // Handle file selection
+    fileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        // Check file type
+        if (file.type !== 'application/json') {
+            showNotification('Please select a JSON file', 'warning');
+            return;
+        }
+        
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+            try {
+                const jsonString = e.target.result;
+                // Update the Gantt chart from the imported JSON
+                if (updateGanttChartFromJson(jsonString)) {
+                    showNotification('Gantt chart data imported successfully', 'success');
+                }
+            } catch (error) {
+                console.error('Error importing Gantt chart data:', error);
+                showNotification('Failed to import Gantt chart data: ' + error.message, 'error');
+            }
+        };
+        
+        reader.onerror = () => {
+            showNotification('Error reading the file', 'error');
+        };
+        
+        reader.readAsText(file);
+    });
+    
+    // Trigger file picker
+    fileInput.click();
+}
+
+// Gantt Chart Voice Modification Functions
+async function startGanttChartModificationRecording() {
+    // If already recording, stop it
+    if (state.ganttModification.isActive) {
+        stopGanttChartModificationRecording();
+        return;
+    }
+    
+    // Mark as active and update UI
+    state.ganttModification.isActive = true;
+    const talkToGanttBtn = document.getElementById('talk-to-gantt');
+    if (talkToGanttBtn) {
+        talkToGanttBtn.classList.add('recording');
+        talkToGanttBtn.innerHTML = '<i class="material-icons">mic</i> Listening... (Click to Stop)';
+    }
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        state.ganttModification.mediaRecorder = new MediaRecorder(stream);
+        state.ganttModification.audioChunks = [];
+        
+        state.ganttModification.mediaRecorder.addEventListener('dataavailable', event => {
+            if (event.data.size > 0) {
+                state.ganttModification.audioChunks.push(event.data);
+            }
+        });
+        
+        state.ganttModification.mediaRecorder.addEventListener('stop', () => {
+            if (state.ganttModification.audioChunks.length > 0) {
+                const audioBlob = new Blob(state.ganttModification.audioChunks, { type: 'audio/wav' });
+                processGanttChartModificationAudio(audioBlob);
+            }
+        });
+        
+        // Start recording
+        state.ganttModification.mediaRecorder.start();
+        showNotification('Voice modification for Gantt chart started - Speak to modify...', 'info');
+        
+    } catch (error) {
+        console.error('Error accessing microphone:', error);
+        showNotification('Could not access microphone', 'error');
+        stopGanttChartModificationRecording();
+    }
+}
+
+function stopGanttChartModificationRecording() {
+    // Reset UI
+    const talkToGanttBtn = document.getElementById('talk-to-gantt');
+    if (talkToGanttBtn) {
+        talkToGanttBtn.classList.remove('recording');
+        talkToGanttBtn.innerHTML = '<i class="material-icons">mic</i> Talk to Chart';
+    }
+    
+    // Stop the media recorder if it exists
+    if (state.ganttModification.mediaRecorder && state.ganttModification.mediaRecorder.state === 'recording') {
+        state.ganttModification.mediaRecorder.stop();
+        state.ganttModification.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    state.ganttModification.isActive = false;
+    showNotification('Voice modification for Gantt chart stopped', 'info');
+}
+
+async function processGanttChartModificationAudio(audioBlob) {
+    try {
+        showLoading('Processing your voice modifications for the Gantt chart...', 10);
+        
+        // Create form data with audio and current Gantt chart data
+        const formData = new FormData();
+        formData.append('audio', audioBlob);
+        formData.append('currentGanttData', state.workAllocation.ganttChartJson || '');
+        
+        updateLoadingPercentage(30);
+        
+        // Send to backend for processing
+        const response = await fetch('/api/modify-gantt-voice', {
+            method: 'POST',
+            body: formData
+        });
+        
+        updateLoadingPercentage(60);
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to process audio');
+        }
+        
+        const data = await response.json();
+        updateLoadingPercentage(80);
+        
+        // Show transcription in notification
+        if (data.transcription) {
+            showNotification(`Transcription: "${data.transcription}"`, 'info', 5000);
+        }
+        
+        // Check if transcription was an error message or indicates no changes needed
+        const isErrorTranscription = data.transcription && 
+            (data.transcription.startsWith("I couldn't hear") || 
+             data.transcription.startsWith("There was an") ||
+             data.transcription.startsWith("Failed to process") ||
+             data.transcription.startsWith("Speech recognition failed"));
+        
+        const noChangesNeeded = data.transcription && 
+            (data.transcription.startsWith("No changes are needed") ||
+             data.transcription.toLowerCase().includes("no changes needed") ||
+             data.transcription.toLowerCase().includes("no changes are required") ||
+             data.transcription.toLowerCase().includes("no modifications needed"));
+        
+        // Check if the Gantt data has actually changed by comparing with the original JSON
+        let ganttDataHasChanged = false;
+        if (data.updatedGanttData) {
+            try {
+                const currentGanttData = state.workAllocation.ganttChartJson ? 
+                    JSON.parse(state.workAllocation.ganttChartJson) : {};
+                const updatedGanttDataObj = JSON.parse(data.updatedGanttData);
+                const currentGanttDataStr = JSON.stringify(currentGanttData);
+                const updatedGanttDataStr = JSON.stringify(updatedGanttDataObj);
+                ganttDataHasChanged = updatedGanttDataStr !== currentGanttDataStr;
+            } catch (e) {
+                console.error("Error comparing Gantt data:", e);
+                ganttDataHasChanged = true; // Assume changes if comparison fails
+            }
+        }
+        
+        // Update Gantt chart with the response
+        if (data.updatedGanttData && ganttDataHasChanged && !isErrorTranscription) {
+            // Update the Gantt chart with the new data
+            updateGanttChartFromJson(data.updatedGanttData);
+            showNotification('Gantt chart updated successfully!', 'success');
+        } else if (isErrorTranscription) {
+            showNotification(data.transcription, 'warning');
+        } else if (noChangesNeeded || !ganttDataHasChanged) {
+            showNotification('No changes were needed to the Gantt chart', 'info');
+        } else {
+            showNotification('Gantt chart processed successfully', 'success');
+        }
+        
+        updateLoadingPercentage(100);
+        hideLoading();
+        
+        // Start recording again to allow continuous voice modification
+        if (state.ganttModification.isActive) {
+            // Clear previous audio chunks
+            state.ganttModification.audioChunks = [];
+            
+            // Start a new recording session
+            if (state.ganttModification.mediaRecorder) {
+                state.ganttModification.mediaRecorder.start();
+                showNotification('Listening for more modifications...', 'info');
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error processing Gantt chart modification audio:', error);
+        hideLoading();
+        showNotification(error.message || 'Error processing audio', 'error');
+        
+        // Even on error, restart recording to allow the user to try again
+        if (state.ganttModification.isActive) {
+            // Clear previous audio chunks
+            state.ganttModification.audioChunks = [];
+            
+            // Start a new recording session
+            if (state.ganttModification.mediaRecorder) {
+                state.ganttModification.mediaRecorder.start();
+                showNotification('Listening for more modifications...', 'info');
+            }
+        }
+    }
+}
+
+// Expose Gantt chart functions to window object so React can access them
+window.startGanttChartModificationRecording = startGanttChartModificationRecording;
+window.stopGanttChartModificationRecording = stopGanttChartModificationRecording;
+window.exportGanttChartJson = exportGanttChartJson;
+window.importGanttChartJson = importGanttChartJson;
+
+// Add this after the audio recording functions
+
+// Handle file upload with drag-and-drop support
+function setupAudioUpload() {
+    const uploadBtn = document.getElementById('upload-audio-btn');
+    const fileInput = document.getElementById('audio-upload');
+    const uploadArea = document.getElementById('upload-audio-area');
+    
+    // Click to upload
+    uploadBtn.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // Process the selected file
+    async function processAudioFile(file) {
+        if (!file || !file.type.startsWith('audio/')) {
+            showNotification('Please select a valid audio file.', 'error');
+            return;
+        }
+        
+        try {
+            // Show loading state with progress indicator
+            showLoading('Processing audio file...', 10);
+            
+            // Update UI to show processing state
+            const uploadIcon = uploadArea.querySelector('.upload-icon');
+            const originalIcon = uploadIcon.textContent;
+            uploadIcon.textContent = 'hourglass_top';
+            uploadArea.classList.add('processing');
+            
+            // Create an audio blob from the file
+            const audioBlob = await convertAudioToWav(file);
+            
+            // Update audio preview
+            elements.audioPlayer.src = URL.createObjectURL(audioBlob);
+            elements.audioPreview.classList.remove('hidden');
+            
+            // Transcribe the audio
+            await transcribeAudio(audioBlob);
+            
+            // Reset the upload area
+            uploadIcon.textContent = originalIcon;
+            uploadArea.classList.remove('processing');
+            
+            // Show success notification
+            showNotification('Audio processed successfully!', 'success');
+            
+        } catch (error) {
+            console.error('Error processing audio file:', error);
+            showNotification('Failed to process audio file. Please try again.', 'error');
+            hideLoading();
+            
+            // Reset the upload area
+            const uploadIcon = uploadArea.querySelector('.upload-icon');
+            uploadIcon.textContent = 'cloud_upload';
+            uploadArea.classList.remove('processing');
+        }
+    }
+    
+    // Handle file selection from input
+    fileInput.addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            processAudioFile(file);
+        }
+    });
+    
+    // Drag and drop functionality
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    // Highlight drop area when item is dragged over it
+    ['dragenter', 'dragover'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, () => {
+            uploadArea.classList.add('drag-over');
+        }, false);
+    });
+    
+    // Remove highlight when item is dragged out or dropped
+    ['dragleave', 'drop'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, () => {
+            uploadArea.classList.remove('drag-over');
+        }, false);
+    });
+    
+    // Handle dropped files
+    uploadArea.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const file = dt.files[0];
+        if (file) {
+            processAudioFile(file);
+        }
+    }, false);
+}
+
+// Convert any audio format to WAV with required parameters
+async function convertAudioToWav(audioFile) {
+    return new Promise((resolve, reject) => {
+        try {
+            // Create audio context
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContext({
+                sampleRate: 16000 // Required sample rate for Azure Speech Services
+            });
+            
+            // Create file reader
+            const reader = new FileReader();
+            
+            reader.onload = async (e) => {
+                try {
+                    // Decode audio data
+                    const audioData = await audioContext.decodeAudioData(e.target.result);
+                    
+                    // Create buffer source
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioData;
+                    
+                    // Create script processor for WAV conversion
+                    const processor = audioContext.createScriptProcessor(16384, 1, 1);
+                    
+                    // Create WAV encoder
+                    const wavEncoder = new WavEncoder({
+                        sampleRate: 16000,
+                        channels: 1
+                    });
+                    
+                    // Process audio data
+                    processor.onaudioprocess = (e) => {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        wavEncoder.encode([inputData]);
+                    };
+                    
+                    // Connect nodes
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
+                    
+                    // Start playback (required for processing)
+                    source.start(0);
+                    
+                    // Wait for processing to complete
+                    source.onended = () => {
+                        // Get WAV data
+                        const wavBlob = new Blob([wavEncoder.finish()], { type: 'audio/wav' });
+                        
+                        // Clean up
+                        source.disconnect();
+                        processor.disconnect();
+                        audioContext.close();
+                        
+                        resolve(wavBlob);
+                    };
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(audioFile);
+            
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+// WAV encoder class
+class WavEncoder {
+    constructor(options = {}) {
+        this.sampleRate = options.sampleRate || 16000;
+        this.channels = options.channels || 1;
+        this.bytes = [];
+    }
+    
+    encode(channelData) {
+        const length = channelData[0].length;
+        
+        // Convert float32 to int16
+        for (let i = 0; i < length; i++) {
+            let value = channelData[0][i];
+            // Clamp value between -1 and 1
+            value = Math.max(-1, Math.min(1, value));
+            // Convert to int16
+            value = value < 0 ? value * 0x8000 : value * 0x7FFF;
+            // Write int16 to bytes
+            this.bytes.push(value & 0xFF, (value >> 8) & 0xFF);
+        }
+    }
+    
+    finish() {
+        const dataLength = this.bytes.length;
+        const buffer = new ArrayBuffer(44 + dataLength);
+        const view = new DataView(buffer);
+        
+        // Write WAV header
+        // RIFF chunk descriptor
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + dataLength, true);
+        writeString(view, 8, 'WAVE');
+        
+        // fmt sub-chunk
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true); // fmt chunk size
+        view.setUint16(20, 1, true); // audio format (PCM)
+        view.setUint16(22, this.channels, true);
+        view.setUint32(24, this.sampleRate, true);
+        view.setUint32(28, this.sampleRate * this.channels * 2, true); // byte rate
+        view.setUint16(32, this.channels * 2, true); // block align
+        view.setUint16(34, 16, true); // bits per sample
+        
+        // data sub-chunk
+        writeString(view, 36, 'data');
+        view.setUint32(40, dataLength, true);
+        
+        // Write audio data
+        for (let i = 0; i < dataLength; i++) {
+            view.setUint8(44 + i, this.bytes[i]);
+        }
+        
+        return buffer;
+    }
+}
+
+function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+    }
+}
+
+// Function to download tasks as TXT
+function downloadTasksAsCSV() {
+    // Get tasks from taskState
+    const tasks = taskState.getTasks();
+    console.log('Download function triggered');
+    console.log('Tasks from taskState:', tasks);
+    
+    // Check if there are tasks to download
+    if (!tasks || tasks.length === 0) {
+        console.error('No tasks found in taskState');
+        showNotification('No tasks available to download.', 'error');
+        return;
+    }
+    
+    // Create text content with better formatting
+    let textContent = 'PROJECT TASKS\n\n';
+    
+    // Add high-level tasks
+    tasks.forEach(task => {
+        textContent += `HIGH-LEVEL TASK: ${task.title}\n`;
+        textContent += `ID: ${task.id}\n`;
+        if (task.description) {
+            textContent += `Description: ${task.description}\n`;
+        }
+        textContent += '\n';
+        
+        // Add sub-tasks for this high-level task
+        const subTasks = task.sub_tasks || [];
+        if (subTasks.length > 0) {
+            textContent += `SUB-TASKS:\n`;
+            subTasks.forEach(subTask => {
+                textContent += `  - ${subTask.title}\n`;
+                textContent += `    ID: ${subTask.id}\n`;
+                if (subTask.description) {
+                    textContent += `    Description: ${subTask.description}\n`;
+                }
+                if (subTask.estimatedHours) {
+                    textContent += `    Estimated Hours: ${subTask.estimatedHours}\n`;
+                }
+                textContent += '\n';
+            });
+        } else {
+            textContent += 'No sub-tasks defined.\n\n';
+        }
+        
+        textContent += '-------------------------------------------\n\n';
+    });
+    
+    // Create a blob and download link
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    // Set link properties
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'project_tasks.txt');
+    link.style.visibility = 'hidden';
+    
+    // Add to document, click and remove
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showNotification('Tasks downloaded successfully!', 'success');
+    console.log('Tasks downloaded as TXT file');
+}
+
+// Update init function to setup audio upload
+function init() {
+    setupEventListeners();
+    setupScrollProgress();
+    setupSidebar();
+    setupGraph();
+    setupWorkAllocation();
+    setupAudioUpload(); // Add this line
+    
+    // Initialize router
+    router.init();
+    
+    // Show tree view by default
+    switchView('tree');
+    
+    // Load saved state from localStorage
+    loadStateFromLocalStorage();
+    
+    // Load saved work allocation data
+    loadWorkAllocationData();
+    
+    // Debug repository form when it's shown
+    router.routes['/new-repo'].onEnter = () => {
+        updateActiveStep(4);
+        console.log('Repository form shown - checking elements:');
+        console.log('repo-name element:', document.getElementById('repo-name'));
+        console.log('repo-description element:', document.getElementById('repo-description'));
+        console.log('create-repo-btn element:', document.getElementById('create-repo-btn'));
+    };
 }

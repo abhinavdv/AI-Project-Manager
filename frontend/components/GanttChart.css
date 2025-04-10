@@ -22,6 +22,74 @@
   margin: 0;
 }
 
+.gantt-chart-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  z-index: 10;
+}
+
+/* Specific styles for React component */
+.gantt-react-actions {
+  display: flex !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  position: relative !important;
+}
+
+.gantt-react-actions .btn-small {
+  display: flex !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.btn-small {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: auto;
+  min-height: 32px;
+}
+
+.btn-small i {
+  font-size: 16px;
+  line-height: 1;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.btn-small:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.btn-small.recording {
+  background-color: #ef4444;
+  color: white;
+  border-color: #ef4444;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
 .gantt-chart-controls {
   display: flex;
   gap: 10px;

@@ -470,28 +470,18 @@ class AzureService:
                         os.unlink(proper_wav.name)
                         os.unlink(temp_audio.name)
                         
+                        # Check the result and return the transcribed text
                         if result.reason == ResultReason.RecognizedSpeech:
                             return result.text
                         elif result.reason == ResultReason.NoMatch:
-                            print("No speech could be recognized. Please speak more clearly or check your microphone.")
-                            return "I couldn't hear what you said. Please try again by speaking clearly."
-                        elif result.reason == ResultReason.Canceled:
-                            cancellation = CancellationDetails.from_result(result)
-                            
-                            if cancellation.reason == CancellationReason.Error:
-                                print(f"Speech recognition canceled due to error: {cancellation.error_details}")
-                                if "401" in cancellation.error_details:
-                                    return "Speech recognition failed: Authentication error. Please check your Azure credentials."
-                                elif "network" in cancellation.error_details.lower():
-                                    return "Speech recognition failed: Network error. Please check your internet connection."
-                                else:
-                                    return f"Speech recognition failed: {cancellation.error_details}"
+                            error_details = CancellationDetails.from_result(result)
+                            if error_details.reason == CancellationReason.Error:
+                                return f"Speech recognition error: {error_details.error_details}"
                             else:
-                                print(f"Speech recognition canceled: {cancellation.reason}")
-                                return "Speech recognition was canceled. Please try again."
-                        else:
-                            print(f"Speech recognition result: {result.reason}")
-                            return "There was an issue understanding your speech."
+                                return "Could not recognize any speech in the audio"
+                        elif result.reason == ResultReason.Canceled:
+                            error_details = CancellationDetails.from_result(result)
+                            return f"Speech recognition canceled: {error_details.reason}"
                         
                 except Exception as e:
                     # Clean up temporary files in case of error

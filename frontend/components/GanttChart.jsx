@@ -185,6 +185,44 @@ const GanttChart = ({ taskAssignments, onDateChange, onTaskClick, onDblClick }) 
     <div className="gantt-chart-container">
       <div className="gantt-chart-header">
         <h3 className="gantt-chart-title">Work Allocation Plan</h3>
+        <div className="gantt-chart-actions">
+          <button 
+            id="talk-to-gantt" 
+            className="btn btn-small" 
+            title="Modify Gantt Chart with Voice"
+            onClick={() => {
+              if (window.startGanttChartModificationRecording) {
+                window.startGanttChartModificationRecording();
+              }
+            }}
+          >
+            <i className="material-icons">mic</i> Talk to Chart
+          </button>
+          <button 
+            id="export-gantt-json" 
+            className="btn btn-small" 
+            title="Export Gantt Chart"
+            onClick={() => {
+              if (window.exportGanttChartJson) {
+                window.exportGanttChartJson();
+              }
+            }}
+          >
+            <i className="material-icons">file_download</i> Export
+          </button>
+          <button 
+            id="import-gantt-json" 
+            className="btn btn-small" 
+            title="Import Gantt Chart"
+            onClick={() => {
+              if (window.importGanttChartJson) {
+                window.importGanttChartJson();
+              }
+            }}
+          >
+            <i className="material-icons">file_upload</i> Import
+          </button>
+        </div>
       </div>
       
       {renderControls()}
